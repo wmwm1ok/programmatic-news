@@ -67,7 +67,7 @@ jobs:
         retention-days: 30
     
     - name: Send email with report
-      if: success() && secrets.SMTP_SERVER != ''
+      if: success()
       uses: dawidd6/action-send-mail@v3
       with:
         server_address: ${{ secrets.SMTP_SERVER }}
@@ -79,9 +79,10 @@ jobs:
         from: 周报自动化系统 <${{ secrets.EMAIL_USERNAME }}>
         html_body: 请查看附件中的周报
         attachments: weekly-report-automation/output/*.html
+      continue-on-error: true
     
     - name: Notify on failure
-      if: failure() && secrets.SMTP_SERVER != ''
+      if: failure()
       uses: dawidd6/action-send-mail@v3
       with:
         server_address: ${{ secrets.SMTP_SERVER }}
@@ -95,3 +96,4 @@ jobs:
           周报生成失败，请检查日志。
           
           运行链接: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      continue-on-error: true
