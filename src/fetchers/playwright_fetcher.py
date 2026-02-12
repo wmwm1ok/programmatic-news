@@ -31,12 +31,19 @@ class PlaywrightFetcher:
             try:
                 from playwright.sync_api import sync_playwright
                 self.pw = sync_playwright().start()
-                self.browser = self.pw.chromium.launch(headless=True)
+                self.browser = self.pw.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                )
                 self.context = self.browser.new_context(
-                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={'width': 1920, 'height': 1080}
                 )
             except ImportError:
                 print("  [!] Playwright 未安装，使用 requests 模式")
+                return False
+            except Exception as e:
+                print(f"  [!] Playwright 启动失败: {e}")
                 return False
         return True
     

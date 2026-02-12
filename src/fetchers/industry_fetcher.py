@@ -34,12 +34,13 @@ class IndustryFetcher(BaseFetcher):
         results = {}
         
         for module_name, config in INDUSTRY_SOURCES.items():
-            print(f"正在抓取行业资讯: {config['name']}...")
+            print(f"  [行业] {config['name']}...")
             try:
                 items = self._fetch_module(config, window_start, window_end)
                 results[config['name']] = items
+                print(f"    ✓ {len(items)} 条")
             except Exception as e:
-                print(f"  抓取 {config['name']} 失败: {e}")
+                print(f"    ✗ 失败: {str(e)[:80]}")
                 results[config['name']] = []
         
         return results
