@@ -21,10 +21,7 @@ from config.settings import COMPETITOR_SOURCES
 
 
 class StealthFetcher:
-    """
-    使用 stealth 技术的抓取器
-    通过修改浏览器指纹、模拟真人行为来绕过 Cloudflare 等反爬虫检测
-    """
+    """使用 stealth 技术的抓取器"""
     
     def __init__(self):
         self.browser = None
@@ -38,209 +35,91 @@ class StealthFetcher:
                 from playwright.sync_api import sync_playwright
                 self.pw = sync_playwright().start()
                 
-                # 启动浏览器时使用 stealth 参数
                 self.browser = self.pw.chromium.launch(
                     headless=True,
                     args=[
                         '--no-sandbox',
                         '--disable-setuid-sandbox',
                         '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--no-first-run',
-                        '--no-zygote',
                         '--disable-gpu',
                         '--disable-extensions',
-                        '--disable-default-apps',
                         '--disable-background-networking',
                         '--disable-background-timer-throttling',
-                        '--disable-backgrounding-occluded-windows',
                         '--disable-breakpad',
-                        '--disable-component-extensions-with-background-pages',
-                        '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+                        '--disable-features=TranslateUI',
                         '--disable-ipc-flooding-protection',
                         '--disable-renderer-backgrounding',
-                        '--enable-features=NetworkService,NetworkServiceInProcess',
+                        '--enable-features=NetworkService',
                         '--force-color-profile=srgb',
                         '--metrics-recording-only',
                         '--mute-audio',
                     ]
                 )
                 
-                # 创建带有 stealth 配置的上下文
                 self.context = self.browser.new_context(
                     viewport={'width': 1920, 'height': 1080},
-                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
                     locale='en-US',
                     timezone_id='America/New_York',
-                    geolocation={'latitude': 40.7128, 'longitude': -74.0060},  # NYC
-                    permissions=['geolocation'],
-                    color_scheme='light',
-                    
-                    # 禁用自动化标志
-                    bypass_csp=True,
-                    java_script_enabled=True,
                 )
                 
-                # 注入 stealth 脚本来隐藏自动化痕迹
+                # 注入 stealth 脚本
                 self.context.add_init_script("""
-                    // 覆盖 navigator.webdriver
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                    
-                    // 覆盖 chrome 对象
-                    window.chrome = {
-                        runtime: {},
-                        loadTimes: function() {},
-                        csi: function() {},
-                        app: {}
-                    };
-                    
-                    // 覆盖 permissions API
-                    const originalQuery = window.navigator.permissions.query;
-                    window.navigator.permissions.query = (parameters) => (
-                        parameters.name === 'notifications' ?
-                            Promise.resolve({ state: Notification.permission }) :
-                            originalQuery(parameters)
-                    );
-                    
-                    // 添加 Plugins 和 MimeTypes
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [
-                            {
-                                0: {
-                                    type: "application/x-google-chrome-pdf",
-                                    suffixes: "pdf",
-                                    description: "Portable Document Format",
-                                    enabledPlugin: Plugin
-                                },
-                                description: "Portable Document Format",
-                                filename: "internal-pdf-viewer",
-                                length: 1,
-                                name: "Chrome PDF Plugin"
-                            }
-                        ]
-                    });
-                    
-                    // 覆盖 notification 权限
-                    const originalNotification = window.Notification;
-                    Object.defineProperty(window, 'Notification', {
-                        get: function() {
-                            return originalNotification;
-                        },
-                        set: function(value) {
-                            originalNotification = value;
-                        }
-                    });
-                    
-                    // 修改 canvas 指纹
-                    const getContext = HTMLCanvasElement.prototype.getContext;
-                    HTMLCanvasElement.prototype.getContext = function(type, ...args) {
-                        const context = getContext.call(this, type, ...args);
-                        if (type === '2d') {
-                            const getImageData = context.getImageData;
-                            context.getImageData = function(x, y, w, h) {
-                                const data = getImageData.call(this, x, y, w, h);
-                                // 添加微小随机噪声来避免指纹追踪
-                                for (let i = 0; i < data.data.length; i += 4) {
-                                    data.data[i] += Math.random() < 0.5 ? -1 : 1;
-                                }
-                                return data;
-                            };
-                        }
-                        return context;
-                    };
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}, app: {}};
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
                 """)
                 
-            except ImportError:
-                print("  [!] Playwright 未安装")
-                return False
             except Exception as e:
-                print(f"  [!] Playwright 初始化失败: {e}")
+                print(f"  [!] Stealth 初始化失败: {e}")
                 return False
         return True
     
-    def _human_like_delay(self, min_ms=500, max_ms=2000):
-        """模拟人类随机延迟"""
+    def _random_delay(self, min_ms=1000, max_ms=3000):
         time.sleep(random.uniform(min_ms, max_ms) / 1000)
     
-    def _human_like_scroll(self, page):
-        """模拟人类滚动行为"""
-        for _ in range(random.randint(2, 5)):
-            page.mouse.wheel(0, random.randint(300, 700))
-            self._human_like_delay(300, 800)
-    
-    def _human_like_mouse_move(self, page):
-        """模拟人类鼠标移动"""
-        for _ in range(random.randint(3, 7)):
-            x = random.randint(100, 1800)
-            y = random.randint(100, 900)
-            page.mouse.move(x, y, steps=random.randint(5, 15))
-            self._human_like_delay(100, 300)
-    
     def fetch_page(self, url: str, wait_for: str = None, timeout: int = 60000) -> str:
-        """使用 stealth 方式获取页面"""
         if not self._init_browser():
             return None
         
         page = self.context.new_page()
         try:
-            print(f"    [Stealth] 访问: {url[:60]}...")
-            
-            # 添加随机延迟，模拟真实用户输入 URL
-            self._human_like_delay(500, 1500)
-            
-            # 访问页面
+            print(f"    [Stealth] 访问: {url[:50]}...")
             page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            self._random_delay(3000, 5000)
             
-            # 模拟人类行为
-            self._human_like_mouse_move(page)
-            self._human_like_scroll(page)
-            
-            # 等待特定元素
             if wait_for:
                 try:
                     page.wait_for_selector(wait_for, timeout=10000)
                 except:
                     pass
             
-            # 额外等待让 JavaScript 渲染
-            self._human_like_delay(3000, 5000)
-            
             html = page.content()
             page.close()
             return html
-            
         except Exception as e:
             print(f"    [Stealth] 错误: {e}")
             page.close()
             return None
     
     def close(self):
-        """关闭浏览器"""
         if self.browser:
             self.browser.close()
         if self.pw:
             self.pw.stop()
     
     def parse_date(self, date_str: str) -> Optional[str]:
-        """解析日期"""
         if not date_str:
             return None
-        
         date_str = date_str.strip()
-        
         patterns = [
             (r"(\d{4})-(\d{1,2})-(\d{1,2})", lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"),
             (r"(\d{1,2})/(\d{1,2})/(\d{4})", lambda m: f"{m.group(3)}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"),
-            (r"(\d{4})/(\d{1,2})/(\d{1,2})", lambda m: f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"),
             (r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})", 
              lambda m: f"{m.group(3)}-{self._month_abbr_to_num(m.group(2)):02d}-{int(m.group(1)):02d}"),
             (r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})", 
              lambda m: f"{m.group(3)}-{self._month_abbr_to_num(m.group(1)):02d}-{int(m.group(2)):02d}"),
-            (r"(\d{4}-\d{2}-\d{2})T", lambda m: m.group(1)),
         ]
-        
         for pattern, formatter in patterns:
             match = re.search(pattern, date_str, re.IGNORECASE)
             if match:
@@ -248,19 +127,14 @@ class StealthFetcher:
                     return formatter(match)
                 except:
                     continue
-        
         return None
     
     def _month_abbr_to_num(self, month_abbr: str) -> int:
-        """月份缩写转数字"""
-        months = {
-            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-        }
+        months = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                  'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
         return months.get(month_abbr.lower()[:3], 1)
     
     def is_in_date_window(self, date_str: str, window_start: datetime, window_end: datetime) -> bool:
-        """检查日期是否在窗口内"""
         if not date_str:
             return False
         try:
@@ -270,44 +144,27 @@ class StealthFetcher:
             return False
     
     def clean_text(self, text: str) -> str:
-        """清理文本"""
         if not text:
             return ""
-        text = re.sub(r'\s+', ' ', text)
-        text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-        return text.strip()
+        return re.sub(r'\s+', ' ', text).strip()
     
     def _fetch_detail(self, url: str) -> str:
-        """获取详情页内容"""
         html = self.fetch_page(url, timeout=30000)
         if not html:
             return ""
-        
         soup = BeautifulSoup(html, 'html.parser')
-        
         for script in soup(["script", "style", "nav", "header", "footer"]):
             script.decompose()
-        
-        content_selectors = [
-            'article',
-            '.content',
-            '.main-content',
-            '.post-content',
-            'main',
-        ]
-        
-        for selector in content_selectors:
+        for selector in ['article', '.content', '.main-content', 'main']:
             elem = soup.select_one(selector)
             if elem:
                 return self.clean_text(elem.get_text(separator=' ', strip=True))
-        
         return ""
     
     def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Criteo - 使用 stealth 模式"""
+        """抓取 Criteo"""
         items = []
         url = COMPETITOR_SOURCES["Criteo"]["url"]
-        
         print("  [Stealth] 抓取 Criteo...")
         
         if not self._init_browser():
@@ -315,34 +172,16 @@ class StealthFetcher:
         
         page = self.context.new_page()
         try:
-            # 先访问主页
-            print(f"    访问主页...")
             page.goto("https://www.criteo.com", wait_until="domcontentloaded", timeout=30000)
-            self._human_like_delay(2000, 4000)
-            self._human_like_scroll(page)
+            self._random_delay(2000, 4000)
             
-            # 再访问投资者页面
-            print(f"    访问投资者页面...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            self._human_like_delay(5000, 8000)  # 等待日历加载
+            self._random_delay(5000, 8000)
             
-            # 模拟人类滚动查看日历
-            self._human_like_scroll(page)
-            
-            # 查找所有可点击的日期按钮
             date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
-            print(f"    找到 {len(date_buttons)} 个可点击日期")
+            print(f"    找到 {len(date_buttons)} 个日期")
             
-            if len(date_buttons) == 0:
-                print(f"    未找到日期按钮，可能是 Cloudflare 挑战")
-                # 截图查看当前状态
-                try:
-                    page.screenshot(path='/tmp/criteo_debug.png')
-                    print(f"    已截图到 /tmp/criteo_debug.png")
-                except:
-                    pass
-            
-            for button in date_buttons[:10]:
+            for button in date_buttons[:15]:
                 try:
                     date_text = button.inner_text().strip()
                     if not date_text.isdigit():
@@ -356,58 +195,409 @@ class StealthFetcher:
                         continue
                     
                     print(f"    点击日期: {date_str}")
-                    
-                    # 模拟人类点击
-                    box = button.bounding_box()
-                    if box:
-                        page.mouse.move(box['x'] + box['width']/2, box['y'] + box['height']/2)
-                        self._human_like_delay(200, 500)
-                    
                     button.click()
-                    self._human_like_delay(3000, 5000)  # 等待新闻加载
+                    self._random_delay(3000, 5000)
                     
-                    # 获取页面内容
                     html = page.content()
                     soup = BeautifulSoup(html, 'html.parser')
                     
-                    # 查找新闻链接 - 使用多种选择器
-                    news_links = soup.find_all('a', href=re.compile(r'news|press|release', re.I))
+                    news_links = soup.find_all('a', href=re.compile(r'202[0-9]'))
+                    print(f"      找到 {len(news_links)} 个链接")
                     
-                    print(f"    找到 {len(news_links)} 个新闻链接")
-                    
-                    for link in news_links[:3]:
+                    for link in news_links[:2]:
                         title = self.clean_text(link.get_text())
                         if not title or len(title) < 10:
                             continue
                         
                         href = link.get('href', '')
-                        if href.startswith('http'):
-                            detail_url = href
-                        else:
-                            detail_url = urljoin(url, href)
+                        detail_url = urljoin(url, href)
                         
-                        print(f"      处理: {title[:50]}...")
-                        
-                        # 在新标签页打开详情
                         content = self._fetch_detail(detail_url)
                         if content:
                             items.append(ContentItem(
-                                title=title,
-                                summary=content[:600],
-                                date=date_str,
-                                url=detail_url,
-                                source="Criteo"
+                                title=title, summary=content[:600], date=date_str,
+                                url=detail_url, source="Criteo"
                             ))
-                            print(f"        ✓ 已添加")
+                            print(f"        ✓ {title[:40]}...")
                             
                 except Exception as e:
-                    print(f"    处理日期出错: {e}")
                     continue
                     
         except Exception as e:
-            print(f"    ✗ Playwright 错误: {e}")
+            print(f"    ✗ Criteo 错误: {e}")
         finally:
             page.close()
         
-        print(f"    Criteo 总计: {len(items)} 条")
+        print(f"    Criteo: {len(items)} 条")
+        return items
+    
+    def fetch_teads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Teads"""
+        items = []
+        url = COMPETITOR_SOURCES["Teads"]["url"]
+        print("  [Stealth] 抓取 Teads...")
+        
+        html = self.fetch_page(url, wait_for=".card", timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        cards = soup.find_all('div', class_='card')
+        print(f"    找到 {len(cards)} 个卡片")
+        
+        for card in cards[:10]:
+            try:
+                link = card.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 从URL提取日期
+                date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', detail_url)
+                if date_match:
+                    date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                else:
+                    continue
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Teads"
+                    ))
+                    print(f"    ✓ {title[:40]}... ({date_str})")
+                    
+            except Exception as e:
+                continue
+        
+        print(f"    Teads: {len(items)} 条")
+        return items
+    
+    def fetch_applovin(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 AppLovin"""
+        items = []
+        url = COMPETITOR_SOURCES["AppLovin"]["url"]
+        print("  [Stealth] 抓取 AppLovin...")
+        
+        html = self.fetch_page(url, wait_for="article", timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        articles = soup.find_all('article') or soup.select('.news-item')
+        print(f"    找到 {len(articles)} 篇文章")
+        
+        for article in articles[:10]:
+            try:
+                link = article.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 尝试从文章元素获取日期
+                date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                date_str = ""
+                if date_elem:
+                    date_str = self.parse_date(date_elem.get_text())
+                
+                # 从URL尝试
+                if not date_str:
+                    date_match = re.search(r'/(\d{4})[-/](\d{2})[-/](\d{2})/', detail_url)
+                    if date_match:
+                        date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                
+                if not date_str:
+                    # 使用当前日期作为备选
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="AppLovin"
+                    ))
+                    print(f"    ✓ {title[:40]}... ({date_str})")
+                    
+            except Exception as e:
+                continue
+        
+        print(f"    AppLovin: {len(items)} 条")
+        return items
+    
+    def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Unity"""
+        items = []
+        url = COMPETITOR_SOURCES["Unity"]["url"]
+        print("  [Stealth] 抓取 Unity...")
+        
+        html = self.fetch_page(url, wait_for="[data-testid='article-card']", timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Unity 使用 data-testid
+        articles = soup.find_all(attrs={'data-testid': 'article-card'})
+        if not articles:
+            articles = soup.find_all('article')
+        
+        print(f"    找到 {len(articles)} 篇文章")
+        
+        for article in articles[:10]:
+            try:
+                link = article.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 从URL提取日期
+                date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', detail_url)
+                if date_match:
+                    date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                else:
+                    continue
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Unity"
+                    ))
+                    print(f"    ✓ {title[:40]}... ({date_str})")
+                    
+            except Exception as e:
+                continue
+        
+        print(f"    Unity: {len(items)} 条")
+        return items
+    
+    def fetch_zeta(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Zeta Global"""
+        items = []
+        url = COMPETITOR_SOURCES["Zeta Global"]["url"]
+        print("  [Stealth] 抓取 Zeta Global...")
+        
+        html = self.fetch_page(url, wait_for="table", timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        rows = soup.find_all('table') or soup.find_all('tr')
+        print(f"    找到 {len(rows)} 行")
+        
+        for row in rows[:15]:
+            try:
+                link = row.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 获取日期
+                date_elem = row.find('td', class_=re.compile('date')) or row.find('time')
+                date_str = ""
+                if date_elem:
+                    date_str = self.parse_date(date_elem.get_text())
+                
+                if not date_str:
+                    continue
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Zeta Global"
+                    ))
+                    print(f"    ✓ {title[:40]}... ({date_str})")
+                    
+            except Exception as e:
+                continue
+        
+        print(f"    Zeta Global: {len(items)} 条")
+        return items
+    
+    def fetch_moloco(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Moloco"""
+        items = []
+        url = COMPETITOR_SOURCES["Moloco"]["url"]
+        print("  [Stealth] 抓取 Moloco...")
+        
+        html = self.fetch_page(url, wait_for="article", timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('post|card'))
+        print(f"    找到 {len(articles)} 篇文章")
+        
+        for article in articles[:10]:
+            try:
+                link = article.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 尝试获取日期
+                date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                date_str = ""
+                if date_elem:
+                    date_str = self.parse_date(date_elem.get_text())
+                
+                # 从URL尝试
+                if not date_str:
+                    date_match = re.search(r'/(\d{4})[-/](\d{2})[-/](\d{2})/', detail_url)
+                    if date_match:
+                        date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                
+                if not date_str:
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Moloco"
+                    ))
+                    print(f"    ✓ {title[:40]}... ({date_str})")
+                    
+            except Exception as e:
+                continue
+        
+        print(f"    Moloco: {len(items)} 条")
+        return items
+    
+    def fetch_magnite(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Magnite"""
+        items = []
+        url = COMPETITOR_SOURCES["Magnite"]["url"]
+        print("  [Stealth] 抓取 Magnite...")
+        
+        html = self.fetch_page(url, wait_for="article", timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('press|news'))
+        print(f"    找到 {len(articles)} 篇文章")
+        
+        for article in articles[:10]:
+            try:
+                link = article.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 获取日期
+                date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                date_str = ""
+                if date_elem:
+                    date_str = self.parse_date(date_elem.get_text())
+                
+                if not date_str:
+                    continue
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Magnite"
+                    ))
+                    print(f"    ✓ {title[:40]}... ({date_str})")
+                    
+            except Exception as e:
+                continue
+        
+        print(f"    Magnite: {len(items)} 条")
+        return items
+    
+    def fetch_generic(self, company_key: str, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """通用抓取方法"""
+        url = COMPETITOR_SOURCES[company_key]["url"]
+        print(f"  [Stealth] 通用抓取 {company_key}...")
+        
+        html = self.fetch_page(url, timeout=60000)
+        if not html:
+            return []
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        items = []
+        
+        # 尝试多种选择器
+        selectors = ['article', 'div.post', 'div.card', '.news-item', '.press-item', 'tr']
+        for selector in selectors:
+            elems = soup.select(selector)
+            if elems:
+                print(f"    使用选择器: {selector}, 找到 {len(elems)} 个")
+                for elem in elems[:5]:
+                    try:
+                        link = elem.find('a', href=True)
+                        if not link:
+                            continue
+                        title = self.clean_text(link.get_text())
+                        if not title or len(title) < 10:
+                            continue
+                        
+                        detail_url = urljoin(url, link['href'])
+                        date_match = re.search(r'/(\d{4})[-/](\d{2})[-/](\d{2})/', detail_url)
+                        if date_match:
+                            date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                            if self.is_in_date_window(date_str, window_start, window_end):
+                                content = self._fetch_detail(detail_url)
+                                if content:
+                                    items.append(ContentItem(
+                                        title=title, summary=content[:600], date=date_str,
+                                        url=detail_url, source=company_key
+                                    ))
+                    except:
+                        continue
+                break
+        
+        print(f"    {company_key}: {len(items)} 条")
         return items

@@ -26,7 +26,6 @@ class HybridCompetitorFetcher:
         self.stealth_fetcher = None
     
     def _get_pw_fetcher(self):
-        """延迟初始化 Playwright"""
         if self.pw_fetcher is None:
             try:
                 self.pw_fetcher = PlaywrightFetcher()
@@ -35,7 +34,6 @@ class HybridCompetitorFetcher:
         return self.pw_fetcher
     
     def _get_stealth_fetcher(self):
-        """延迟初始化 Stealth Fetcher"""
         if self.stealth_fetcher is None:
             try:
                 self.stealth_fetcher = StealthFetcher()
@@ -47,73 +45,89 @@ class HybridCompetitorFetcher:
         """抓取所有竞品资讯"""
         results = {}
         
-        # 先用 requests 抓取
-        print("\n[2/6] 抓取竞品资讯 (Phase 1: HTTP)...")
+        # Phase 1: HTTP 抓取
+        print("\n[1/3] 抓取竞品资讯 (HTTP)...")
         results = self.requests_fetcher.fetch_all(window_start, window_end)
         
-        # 检查哪些公司没有抓到内容
-        missing_companies = []
+        # 找出未抓到的公司
+        missing = []
         for key in COMPETITOR_SOURCES.keys():
             name = COMPETITOR_SOURCES[key]["name"]
             if name not in results or not results[name]:
-                missing_companies.append((key, name))
+                missing.append((key, name))
         
-        # Phase 2: 使用 Playwright 抓取
+        if not missing:
+            print("  所有公司已通过 HTTP 抓取成功")
+            return results
+        
+        print(f"  {len(missing)} 家公司需要进一步抓取")
+        
+        # Phase 2: Playwright 抓取
         still_missing = []
-        if missing_companies:
-            print(f"\n  [Phase 2: Playwright] 补充抓取 {len(missing_companies)} 家公司...")
-            pw = self._get_pw_fetcher()
-            if pw:
-                for key, name in missing_companies:
-                    try:
-                        if key == "AppLovin":
-                            items = pw.fetch_applovin(window_start, window_end)
-                        elif key == "Unity":
-                            items = pw.fetch_unity(window_start, window_end)
-                        elif key == "Criteo":
-                            items = pw.fetch_criteo(window_start, window_end)
-                        elif key == "Taboola":
-                            items = pw.fetch_taboola(window_start, window_end)
-                        elif key == "Teads":
-                            items = pw.fetch_teads(window_start, window_end)
-                        elif key == "Zeta Global":
-                            items = pw.fetch_zeta(window_start, window_end)
-                        else:
-                            still_missing.append((key, name))
-                            continue
-                        
-                        if items:
-                            results[name] = items
-                            print(f"    ✓ {name}: {len(items)} 条 (Playwright)")
-                        else:
-                            still_missing.append((key, name))
-                    except Exception as e:
-                        print(f"    ✗ {name}: {e}")
+        print("\n[2/3] 抓取竞品资讯 (Playwright)...")
+        pw = self._get_pw_fetcher()
+        if pw:
+            for key, name in missing:
+                try:
+                    items = []
+                    if key == "AppLovin":
+                        items = pw.fetch_applovin(window_start, window_end)
+                    elif key == "Unity":
+                        items = pw.fetch_unity(window_start, window_end)
+                    elif key == "Taboola":
+                        items = pw.fetch_taboola(window_start, window_end)
+                    elif key == "Teads":
+                        items = pw.fetch_teads(window_start, window_end)
+                    elif key == "Zeta Global":
+                        items = pw.fetch_zeta(window_start, window_end)
+                    elif key == "Criteo":
+                        items = pw.fetch_criteo(window_start, window_end)
+                    
+                    if items:
+                        results[name] = items
+                        print(f"    ✓ {name}: {len(items)} 条")
+                    else:
                         still_missing.append((key, name))
-                
-                pw.close()
-            else:
-                still_missing = missing_companies
+                except Exception as e:
+                    print(f"    ✗ {name}: {e}")
+                    still_missing.append((key, name))
+            pw.close()
+        else:
+            still_missing = missing
         
-        # Phase 3: 使用 Stealth 模式抓取剩余的有反爬虫保护的网站
-        if still_missing:
-            print(f"\n  [Phase 3: Stealth] 高级抓取 {len(still_missing)} 家公司...")
-            stealth = self._get_stealth_fetcher()
-            if stealth:
-                for key, name in still_missing:
-                    try:
-                        if key == "Criteo":
-                            # Criteo 有 Cloudflare，使用 stealth
-                            items = stealth.fetch_criteo(window_start, window_end)
-                        else:
-                            continue
-                        
-                        if items:
-                            results[name] = items
-                            print(f"    ✓ {name}: {len(items)} 条 (Stealth)")
-                    except Exception as e:
-                        print(f"    ✗ {name}: {e}")
-                
-                stealth.close()
+        if not still_missing:
+            return results
+        
+        # Phase 3: Stealth 模式抓取
+        print("\n[3/3] 抓取竞品资讯 (Stealth)...")
+        stealth = self._get_stealth_fetcher()
+        if stealth:
+            for key, name in still_missing:
+                try:
+                    items = []
+                    if key == "Criteo":
+                        items = stealth.fetch_criteo(window_start, window_end)
+                    elif key == "Teads":
+                        items = stealth.fetch_teads(window_start, window_end)
+                    elif key == "AppLovin":
+                        items = stealth.fetch_applovin(window_start, window_end)
+                    elif key == "Unity":
+                        items = stealth.fetch_unity(window_start, window_end)
+                    elif key == "Zeta Global":
+                        items = stealth.fetch_zeta(window_start, window_end)
+                    elif key == "Moloco":
+                        items = stealth.fetch_moloco(window_start, window_end)
+                    elif key == "Magnite":
+                        items = stealth.fetch_magnite(window_start, window_end)
+                    else:
+                        items = stealth.fetch_generic(key, window_start, window_end)
+                    
+                    if items:
+                        results[name] = items
+                        print(f"    ✓ {name}: {len(items)} 条 (Stealth)")
+                except Exception as e:
+                    print(f"    ✗ {name}: {e}")
+            
+            stealth.close()
         
         return results
