@@ -24,6 +24,20 @@ class IndustryFetcher(BaseFetcher):
     def __init__(self):
         super().__init__()
     
+    def __init__(self):
+        super().__init__()
+        self.stealth_fetcher = None
+    
+    def _get_stealth_fetcher(self):
+        """延迟初始化 Stealth Fetcher"""
+        if self.stealth_fetcher is None:
+            try:
+                from .stealth_fetcher import StealthFetcher
+                self.stealth_fetcher = StealthFetcher()
+            except Exception as e:
+                print(f"    [!] Stealth 初始化失败: {e}")
+        return self.stealth_fetcher
+    
     def fetch_all(self, window_start: datetime, window_end: datetime) -> Dict[str, List[ContentItem]]:
         """
         抓取所有行业资讯
@@ -36,14 +50,84 @@ class IndustryFetcher(BaseFetcher):
         for module_name, config in INDUSTRY_SOURCES.items():
             print(f"  [行业] {config['name']}...")
             try:
+                # 先用普通方式抓取
                 items = self._fetch_module(config, window_start, window_end)
+                
+                # 如果 Search Engine Land 没抓到，尝试 stealth 模式
+                if config['name'] == 'Others' and len(items) == 0:
+                    print(f"    尝试 Stealth 模式...")
+                    stealth = self._get_stealth_fetcher()
+                    if stealth:
+                        items = self._fetch_with_stealth(config, window_start, window_end, stealth)
+                
                 results[config['name']] = items
                 print(f"    ✓ {len(items)} 条")
             except Exception as e:
                 print(f"    ✗ 失败: {str(e)[:80]}")
                 results[config['name']] = []
         
+        # 关闭 stealth fetcher
+        if self.stealth_fetcher:
+            self.stealth_fetcher.close()
+        
         return results
+    
+    def _fetch_with_stealth(self, config: dict, window_start: datetime, window_end: datetime, stealth) -> List[ContentItem]:
+        """使用 stealth 模式抓取"""
+        url = config["url"]
+        max_items = config.get("max_items", 3)
+        
+        html = stealth.fetch_page(url, wait_for="article", timeout=60000)
+        if not html:
+            return []
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        items = []
+        
+        # Search Engine Land 使用 article.stream-article
+        articles = soup.find_all('article', class_='stream-article')
+        print(f"    Stealth 找到 {len(articles)} 篇文章")
+        
+        for article in articles[:max_items]:
+            try:
+                title_elem = article.find(['h2', 'h3', 'h1'])
+                if not title_elem:
+                    continue
+                
+                link_elem = title_elem.find('a', href=True)
+                if not link_elem:
+                    continue
+                
+                title = stealth.clean_text(link_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                detail_url = urljoin(url, link_elem['href'])
+                
+                # 获取日期
+                date_str = self._extract_sel_date(article)
+                if not date_str or not stealth.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                print(f"    Stealth 处理: {title[:50]}... ({date_str})")
+                
+                # 获取详情页内容
+                content = stealth._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title,
+                        summary=content[:500],
+                        date=date_str,
+                        url=detail_url,
+                        source=config['name']
+                    ))
+                    print(f"      ✓ 已添加")
+                    
+            except Exception as e:
+                print(f"    Stealth 处理出错: {e}")
+                continue
+        
+        return items
     
     def _fetch_module(self, config: dict, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """
