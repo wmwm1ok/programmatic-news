@@ -23,9 +23,6 @@ class IndustryFetcher(BaseFetcher):
     
     def __init__(self):
         super().__init__()
-    
-    def __init__(self):
-        super().__init__()
         self.stealth_fetcher = None
     
     def _get_stealth_fetcher(self):
