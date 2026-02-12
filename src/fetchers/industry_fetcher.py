@@ -75,76 +75,94 @@ class IndustryFetcher(BaseFetcher):
                            window_start: datetime, window_end: datetime, max_items: int) -> List[ContentItem]:
         """
         解析 AdExchanger 网站
+        关键：文章容器是 div.adx-snippet，日期只在详情页
         """
         items = []
         
-        # AdExchanger 的文章列表结构
-        articles = soup.find_all('article', class_=re.compile('post|entry'))
+        # AdExchanger 使用 div.adx-snippet 作为文章容器
+        articles = soup.find_all('div', class_='adx-snippet')
         if not articles:
-            # 尝试其他选择器
+            # 备选选择器
             articles = soup.find_all('div', class_=re.compile('post|entry|card|article'))
         if not articles:
             articles = soup.find_all('article')
+        
+        print(f"    找到 {len(articles)} 篇文章")
         
         for article in articles:
             if len(items) >= max_items:
                 break
             
             try:
-                # 获取标题和链接
-                title_elem = article.find(['h2', 'h3', 'h1'], class_=re.compile('title|heading'))
-                if not title_elem:
-                    title_elem = article.find(['h2', 'h3', 'h1'])
-                
-                if not title_elem:
-                    continue
-                
-                link_elem = title_elem.find('a', href=True)
+                # 获取标题和链接 - 在 .link-post 中
+                link_elem = article.find('a', class_='link-post', href=True)
                 if not link_elem:
-                    # 尝试在其他位置找链接
-                    link_elem = article.find('a', href=True, class_=re.compile('title|read|more'))
+                    # 备选：在 h2/h3 中找链接
+                    title_elem = article.find(['h2', 'h3', 'h1'])
+                    if title_elem:
+                        link_elem = title_elem.find('a', href=True)
                 
                 if not link_elem:
                     continue
                 
                 title = self.clean_text(link_elem.get_text())
-                detail_url = self.normalize_url(base_url, link_elem['href'])
-                
-                # 获取日期
-                date_str = self._extract_adexchanger_date(article)
-                
-                if not date_str or not self.is_in_date_window(date_str, window_start, window_end):
+                if not title or len(title) < 10:
                     continue
                 
-                # 获取详情页内容
+                detail_url = self.normalize_url(base_url, link_elem['href'])
+                
+                # AdExchanger 日期只在详情页，必须先获取详情页
+                print(f"    获取详情页: {title[:50]}...")
                 detail_html = self.fetch(detail_url)
-                if detail_html:
-                    content = self._extract_adexchanger_content(detail_html)
-                    if content:
-                        items.append(ContentItem(
-                            title=title,
-                            summary=content[:500],
-                            date=date_str,
-                            url=detail_url,
-                            source=module_name
-                        ))
+                if not detail_html:
+                    continue
+                
+                # 从详情页提取日期
+                date_str = self._extract_adexchanger_date_from_html(detail_html)
+                
+                if not date_str:
+                    print(f"      未找到日期，跳过")
+                    continue
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    print(f"      日期 {date_str} 不在窗口内")
+                    continue
+                
+                # 提取详情页内容
+                content = self._extract_adexchanger_content(detail_html)
+                if content:
+                    items.append(ContentItem(
+                        title=title,
+                        summary=content[:500],
+                        date=date_str,
+                        url=detail_url,
+                        source=module_name
+                    ))
+                    print(f"      ✓ 已添加 ({date_str})")
+                    
             except Exception as e:
+                print(f"    处理文章出错: {e}")
                 continue
         
         return items
     
-    def _extract_adexchanger_date(self, article) -> str:
-        """提取 AdExchanger 日期"""
-        # 尝试多种日期选择器
-        date_elem = (
-            article.find('time', class_=re.compile('date|published')) or
-            article.find('span', class_=re.compile('date|time')) or
-            article.find(class_=re.compile('date|published|time'))
-        )
+    def _extract_adexchanger_date_from_html(self, html: str) -> str:
+        """从 AdExchanger 详情页 HTML 提取日期"""
+        soup = BeautifulSoup(html, 'html.parser')
         
-        if date_elem:
-            date_text = date_elem.get_text()
-            return self.parse_date(date_text) or self.parse_date(date_elem.get('datetime', ''))
+        # 方法1: time 标签
+        time_elem = soup.find('time')
+        if time_elem:
+            datetime_attr = time_elem.get('datetime', '')
+            if datetime_attr:
+                # 解析 2026-02-12T01:00:00-05:00 格式
+                match = __import__('re').match(r'(\d{4}-\d{2}-\d{2})', datetime_attr)
+                if match:
+                    return match.group(1)
+            date_text = time_elem.get_text()
+            parsed = self.parse_date(date_text)
+            if parsed:
+                return parsed
         
         return ""
     
@@ -180,13 +198,19 @@ class IndustryFetcher(BaseFetcher):
                                 window_start: datetime, window_end: datetime, max_items: int) -> List[ContentItem]:
         """
         解析 Search Engine Land 网站
+        关键：文章容器是 article.stream-article
         """
         items = []
         
-        # Search Engine Land 的文章列表结构
-        articles = soup.find_all('article', class_=re.compile('post|article'))
+        # Search Engine Land 使用 article.stream-article
+        articles = soup.find_all('article', class_='stream-article')
+        if not articles:
+            # 备选
+            articles = soup.find_all('article', class_=re.compile('post|article'))
         if not articles:
             articles = soup.find_all('div', class_=re.compile('post|article|card'))
+        
+        print(f"    找到 {len(articles)} 篇文章")
         
         for article in articles:
             if len(items) >= max_items:
@@ -206,13 +230,23 @@ class IndustryFetcher(BaseFetcher):
                     continue
                 
                 title = self.clean_text(link_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
                 detail_url = self.normalize_url(base_url, link_elem['href'])
                 
                 # 获取日期
                 date_str = self._extract_sel_date(article)
                 
-                if not date_str or not self.is_in_date_window(date_str, window_start, window_end):
+                if not date_str:
+                    print(f"    未找到日期: {title[:50]}...")
                     continue
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    print(f"    日期 {date_str} 不在窗口内: {title[:50]}...")
+                    continue
+                
+                print(f"    处理: {title[:50]}... ({date_str})")
                 
                 # 获取详情页内容
                 detail_html = self.fetch(detail_url)
@@ -226,22 +260,49 @@ class IndustryFetcher(BaseFetcher):
                             url=detail_url,
                             source=module_name
                         ))
+                        print(f"      ✓ 已添加")
+                    else:
+                        print(f"      ✗ 无法提取内容")
+                else:
+                    print(f"      ✗ 无法获取详情页")
+                    
             except Exception as e:
+                print(f"    处理文章出错: {e}")
                 continue
         
+        print(f"    总计: {len(items)} 条")
         return items
     
     def _extract_sel_date(self, article) -> str:
         """提取 Search Engine Land 日期"""
-        date_elem = (
-            article.find('time', class_=re.compile('date|published')) or
-            article.find('span', class_=re.compile('date|time')) or
-            article.find(class_=re.compile('date|published'))
-        )
+        # 方法1: time 标签
+        time_elem = article.find('time')
+        if time_elem:
+            datetime_attr = time_elem.get('datetime', '')
+            if datetime_attr:
+                match = re.search(r'(\d{4}-\d{2}-\d{2})', datetime_attr)
+                if match:
+                    return match.group(1)
+            parsed = self.parse_date(time_elem.get_text())
+            if parsed:
+                return parsed
         
+        # 方法2: 查找包含 "Feb 11, 2026" 格式的文本
+        date_pattern = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}'
+        date_matches = article.find_all(string=re.compile(date_pattern, re.IGNORECASE))
+        for match in date_matches:
+            date_text = match.strip()
+            if date_text:
+                parsed = self.parse_date(date_text)
+                if parsed:
+                    return parsed
+        
+        # 方法3: 通用日期类
+        date_elem = article.find(class_=re.compile('date|published|time'))
         if date_elem:
-            date_text = date_elem.get_text()
-            return self.parse_date(date_text) or self.parse_date(date_elem.get('datetime', ''))
+            parsed = self.parse_date(date_elem.get_text())
+            if parsed:
+                return parsed
         
         return ""
     
