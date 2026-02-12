@@ -1,0 +1,87 @@
+name: Weekly Report Generator
+
+on:
+  schedule:
+    # 每周一早上9点 UTC（北京时间下午5点）
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Install Playwright
+      run: |
+        playwright install chromium
+    
+    - name: Generate weekly report
+      env:
+        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        DEEPSEEK_API_BASE: https://api.deepseek.com
+        DEEPSEEK_MODEL: deepseek-chat
+        # 邮件配置
+        EMAIL_TO: wmwm1ok@gmail.com
+        EMAIL_FROM: ${{ secrets.EMAIL_USERNAME }}
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+        SMTP_PORT: ${{ secrets.SMTP_PORT }}
+        EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      run: |
+        python generate_with_ai.py
+    
+    - name: Upload report as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: weekly-report-${{ github.run_id }}
+        path: output/*.html
+        retention-days: 30
+    
+    - name: Send email with report
+      if: success()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.SMTP_SERVER }}
+        server_port: ${{ secrets.SMTP_PORT }}
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: 竞品周报 ${{ github.run_id }}
+        to: wmwm1ok@gmail.com
+        from: 周报自动化系统 <${{ secrets.EMAIL_USERNAME }}>
+        html_body: 请查看附件中的周报
+        attachments: output/*.html
+    
+    - name: Notify on failure
+      if: failure()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.SMTP_SERVER }}
+        server_port: ${{ secrets.SMTP_PORT }}
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: 【失败】周报生成失败
+        to: wmwm1ok@gmail.com
+        from: 周报自动化系统 <${{ secrets.EMAIL_USERNAME }}>
+        body: |
+          周报生成失败，请检查日志。
+          
+          运行链接: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

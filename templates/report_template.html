@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>竞品周报 {{START_DATE}} ~ {{END_DATE}}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            font-size: 24px;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+            border-bottom: 2px solid #1890ff;
+            padding-bottom: 12px;
+        }
+        
+        .date-range {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        h2 {
+            font-size: 18px;
+            color: #1890ff;
+            margin: 30px 0 15px 0;
+            padding-left: 12px;
+            border-left: 4px solid #1890ff;
+        }
+        
+        /* 竞品资讯表格样式 */
+        .competitor-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        
+        .competitor-table th {
+            background-color: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #e8e8e8;
+        }
+        
+        .competitor-table td {
+            padding: 15px 12px;
+            border-bottom: 1px solid #e8e8e8;
+            vertical-align: top;
+        }
+        
+        .competitor-table tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .company {
+            font-weight: 600;
+            color: #1890ff;
+            white-space: nowrap;
+            width: 120px;
+        }
+        
+        /* 通用内容样式 */
+        .item-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        
+        .item-summary {
+            font-size: 14px;
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        
+        .item-meta {
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .item-meta a {
+            color: #1890ff;
+            text-decoration: none;
+        }
+        
+        .item-meta a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 行业资讯卡片样式 */
+        .industry-section {
+            margin-top: 20px;
+        }
+        
+        .industry-subsection {
+            margin-bottom: 25px;
+        }
+        
+        .industry-subsection-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e8e8e8;
+        }
+        
+        .industry-item {
+            padding: 15px;
+            background-color: #fafafa;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        
+        .industry-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        /* 隐藏类 */
+        .hidden {
+            display: none !important;
+        }
+        
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: #999;
+            font-size: 14px;
+        }
+        
+        /* 页脚 */
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e8e8e8;
+            font-size: 12px;
+            color: #999;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>竞品周报</h1>
+        <p class="date-range">{{START_DATE}} ~ {{END_DATE}}</p>
+        
+        <!-- 竞品资讯模块 -->
+        <h2>一、竞品资讯</h2>
+        <table class="competitor-table">
+            <thead>
+                <tr>
+                    <th style="width: 120px;">公司</th>
+                    <th>内容</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{COMPETITOR_SECTION_HTML}}
+            </tbody>
+        </table>
+        
+        <!-- 行业资讯模块 -->
+        <h2>二、行业资讯</h2>
+        <div class="industry-section">
+            
+            <!-- Publisher -->
+            <div class="industry-subsection {{INDUSTRY_PUBLISHER_HIDDEN_CLASS}}">
+                <div class="industry-subsection-title">Publisher</div>
+                {{INDUSTRY_PUBLISHER_ITEMS_HTML}}
+                {{INDUSTRY_PUBLISHER_EMPTY_HTML}}
+            </div>
+            
+            <!-- Technology -->
+            <div class="industry-subsection {{INDUSTRY_TECHNOLOGY_HIDDEN_CLASS}}">
+                <div class="industry-subsection-title">Technology</div>
+                {{INDUSTRY_TECHNOLOGY_ITEMS_HTML}}
+                {{INDUSTRY_TECHNOLOGY_EMPTY_HTML}}
+            </div>
+            
+            <!-- Platform -->
+            <div class="industry-subsection {{INDUSTRY_PLATFORM_HIDDEN_CLASS}}">
+                <div class="industry-subsection-title">Platform</div>
+                {{INDUSTRY_PLATFORM_ITEMS_HTML}}
+                {{INDUSTRY_PLATFORM_EMPTY_HTML}}
+            </div>
+            
+            <!-- Artificial Intelligence -->
+            <div class="industry-subsection {{INDUSTRY_AI_HIDDEN_CLASS}}">
+                <div class="industry-subsection-title">Artificial Intelligence</div>
+                {{INDUSTRY_AI_ITEMS_HTML}}
+                {{INDUSTRY_AI_EMPTY_HTML}}
+            </div>
+            
+            <!-- Others -->
+            <div class="industry-subsection {{INDUSTRY_OTHERS_HIDDEN_CLASS}}">
+                <div class="industry-subsection-title">Others</div>
+                {{INDUSTRY_OTHERS_ITEMS_HTML}}
+                {{INDUSTRY_OTHERS_EMPTY_HTML}}
+            </div>
+            
+        </div>
+        
+        <div class="footer">
+            本报告由自动化系统生成 · {{GENERATED_AT}}
+        </div>
+    </div>
+</body>
+</html>
