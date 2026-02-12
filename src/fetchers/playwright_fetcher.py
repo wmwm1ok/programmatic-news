@@ -260,9 +260,10 @@ class PlaywrightFetcher:
         
         page = self.context.new_page()
         try:
-            # 访问页面并等待加载
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            page.wait_for_timeout(3000)
+            # 访问页面并等待加载 - 增加超时时间，使用 domcontentloaded 而不是 networkidle
+            print(f"    访问 {url}...")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)  # 等待 JavaScript 渲染
             
             # 查找所有可点击的日期按钮
             date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')

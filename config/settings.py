@@ -137,9 +137,9 @@ INDUSTRY_SOURCES = {
 # =============================================================================
 
 SCRAPER_CONFIG = {
-    "timeout": 15,
-    "retry_times": 2,
-    "retry_delay": 1,
+    "timeout": 30,  # 增加超时时间
+    "retry_times": 3,  # 增加重试次数
+    "retry_delay": 2,
     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "headers": {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",

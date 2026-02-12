@@ -89,7 +89,8 @@ class IndustryFetcher(BaseFetcher):
         
         print(f"    找到 {len(articles)} 篇文章")
         
-        for article in articles:
+        # 只处理前 10 篇文章，避免超时
+        for article in articles[:10]:
             if len(items) >= max_items:
                 break
             
@@ -112,20 +113,21 @@ class IndustryFetcher(BaseFetcher):
                 detail_url = self.normalize_url(base_url, link_elem['href'])
                 
                 # AdExchanger 日期只在详情页，必须先获取详情页
-                print(f"    获取详情页: {title[:50]}...")
+                print(f"    [{len(items)+1}/{max_items}] 获取详情页: {title[:40]}...")
                 detail_html = self.fetch(detail_url)
                 if not detail_html:
+                    print(f"      ✗ 无法获取详情页")
                     continue
                 
                 # 从详情页提取日期
                 date_str = self._extract_adexchanger_date_from_html(detail_html)
                 
                 if not date_str:
-                    print(f"      未找到日期，跳过")
+                    print(f"      ✗ 未找到日期")
                     continue
                 
                 if not self.is_in_date_window(date_str, window_start, window_end):
-                    print(f"      日期 {date_str} 不在窗口内")
+                    print(f"      - 日期 {date_str} 不在窗口内")
                     continue
                 
                 # 提取详情页内容
@@ -139,6 +141,8 @@ class IndustryFetcher(BaseFetcher):
                         source=module_name
                     ))
                     print(f"      ✓ 已添加 ({date_str})")
+                else:
+                    print(f"      ✗ 无法提取内容")
                     
             except Exception as e:
                 print(f"    处理文章出错: {e}")
