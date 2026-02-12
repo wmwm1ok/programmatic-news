@@ -5,6 +5,8 @@ on:
     # 每周一早上9点 UTC（北京时间下午5点）
     - cron: '0 9 * * 1'
   workflow_dispatch:  # 允许手动触发
+  push:
+    branches: [ main ]  # 推送时触发（用于测试）
 
 jobs:
   generate-report:
