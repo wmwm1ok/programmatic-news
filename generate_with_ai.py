@@ -16,11 +16,11 @@ from fetchers.industry_fetcher import IndustryFetcher
 from summarizer import Summarizer
 from renderer import HTMLRenderer
 
-print("=" * 60)
+print("=" * 70)
 print("使用 DeepSeek API 生成周报")
-print("=" * 60)
+print("=" * 70)
 
-# 使用当前日期作为窗口结束日期（设为当天最后一毫秒，确保当天内容被包含）
+# 使用当前日期作为窗口结束日期
 window_end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
 window_start = (window_end - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
 start_str = str(window_start.date())
@@ -32,23 +32,39 @@ print(f"\n日期窗口: {start_str} ~ {end_str}")
 api_key = os.getenv('DEEPSEEK_API_KEY')
 if not api_key:
     print("\n❌ 错误: 未设置 DEEPSEEK_API_KEY 环境变量")
-    print("请在 GitHub Secrets 中设置 DEEPSEEK_API_KEY")
     sys.exit(1)
 else:
-    print(f"✓ API Key 已设置: {api_key[:10]}...")
+    print(f"✓ API Key 已设置")
 
-# 1. 抓取所有竞品资讯
+# 1. 抓取竞品资讯
 print("\n[1/4] 抓取竞品资讯...")
+competitor_results = {}
 try:
+    # 设置超时，避免无限等待
+    import signal
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutError("抓取超时")
+    
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(300)  # 5分钟超时
+    
     fetcher = HybridCompetitorFetcher()
     competitor_results = fetcher.fetch_all(window_start, window_end)
     
-    # 统计总数
+    signal.alarm(0)  # 取消超时
+    
     competitor_items = []
     for company, items in competitor_results.items():
         competitor_items.extend(items)
         print(f"  {company}: {len(items)} 条")
     print(f"  竞品总计: {len(competitor_items)} 条")
+    
+except TimeoutError:
+    print("⚠️ 竞品抓取超时，使用已获取的数据")
+    competitor_items = []
+    for company, items in competitor_results.items():
+        competitor_items.extend(items)
 except Exception as e:
     print(f"❌ 抓取竞品失败: {e}")
     traceback.print_exc()
@@ -57,6 +73,8 @@ except Exception as e:
 
 # 2. 抓取行业资讯
 print("\n[2/4] 抓取行业资讯...")
+industry_items = {}
+total_ind = 0
 try:
     ind_fetcher = IndustryFetcher()
     industry_items = ind_fetcher.fetch_all(window_start, window_end)
@@ -86,7 +104,6 @@ try:
                 print(f"      ✓ {len(item.summary)} 字")
             except Exception as e:
                 print(f"      ✗ 摘要生成失败: {e}")
-                # 保留原始内容作为摘要
                 item.summary = item.summary[:100] if item.summary else "摘要生成失败"
     else:
         print("  没有竞品内容需要生成摘要")
@@ -116,14 +133,13 @@ try:
     html = renderer.render(competitor_results, industry_items, start_str, end_str)
     output_path = renderer.save(html, start_str, end_str)
     
-    print(f"\n{'=' * 60}")
+    print(f"\n{'=' * 70}")
     print(f"✅ 周报已生成: {output_path}")
     print(f"  竞品: {len(competitor_items)} 条")
     print(f"  行业: {total_ind} 条")
     print(f"  总计: {len(competitor_items) + total_ind} 条")
-    print('=' * 60)
+    print('=' * 70)
     
-    # 验证输出文件存在
     if os.path.exists(output_path):
         file_size = os.path.getsize(output_path)
         print(f"✓ 文件大小: {file_size} bytes")
