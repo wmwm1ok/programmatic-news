@@ -66,6 +66,7 @@ class BaseFetcher:
                 response.raise_for_status()
                 return response.text
             except Exception as e:
+                print(f"    [!] 请求失败 (尝试 {attempt + 1}/{self.retry_times}): {str(e)[:80]}")
                 if attempt < self.retry_times - 1:
                     time.sleep(self.retry_delay * (attempt + 1))
                     continue

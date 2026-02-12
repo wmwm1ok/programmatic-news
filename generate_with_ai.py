@@ -20,10 +20,9 @@ print("=" * 60)
 print("使用 DeepSeek API 生成周报")
 print("=" * 60)
 
-# 使用当前日期作为窗口结束日期
-# 扩大窗口到 30 天，增加抓取到内容的概率
-window_end = datetime.now()
-window_start = window_end - timedelta(days=30)
+# 使用当前日期作为窗口结束日期（设为当天最后一毫秒，确保当天内容被包含）
+window_end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
+window_start = (window_end - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
 start_str = str(window_start.date())
 end_str = str(window_end.date())
 

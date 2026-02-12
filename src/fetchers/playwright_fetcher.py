@@ -249,48 +249,90 @@ class PlaywrightFetcher:
         return items
     
     def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Criteo"""
+        """抓取 Criteo - 使用日历控件"""
         items = []
         url = COMPETITOR_SOURCES["Criteo"]["url"]
         
         print("  [Playwright] 抓取 Criteo...")
-        html = self.fetch_page(url, wait_for="table, .item, .release")
-        if not html:
+        
+        if not self._init_browser():
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
-        rows = soup.find_all('tr') or soup.select('.item, .release-item')
-        
-        print(f"    找到 {len(rows)} 行")
-        
-        for row in rows[:15]:
-            try:
-                link_elem = row.find('a', href=True)
-                if not link_elem:
-                    continue
-                
-                detail_url = urljoin(url, link_elem['href'])
-                title = self.clean_text(link_elem.get_text())
-                
-                date_elem = row.find('td', class_=re.compile('date')) or row.find('time')
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text())
-                
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
-                    content = self._fetch_detail(detail_url)
-                    if content:
-                        items.append(ContentItem(
-                            title=title,
-                            summary=content[:600],
-                            date=date_str,
-                            url=detail_url,
-                            source="Criteo"
-                        ))
+        page = self.context.new_page()
+        try:
+            # 访问页面并等待加载
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(3000)
+            
+            # 查找所有可点击的日期按钮
+            date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
+            print(f"    找到 {len(date_buttons)} 个可点击日期")
+            
+            for button in date_buttons[:10]:  # 只处理前10个日期
+                try:
+                    # 获取日期文本
+                    date_text = button.inner_text().strip()
+                    if not date_text.isdigit():
+                        continue
+                    
+                    day = int(date_text)
+                    # 构造日期（假设是当前年月）
+                    from datetime import datetime
+                    now = datetime.now()
+                    date_str = f"{now.year}-{now.month:02d}-{day:02d}"
+                    
+                    # 检查日期是否在窗口内
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        continue
+                    
+                    print(f"    点击日期: {date_str}")
+                    
+                    # 点击日期
+                    button.click()
+                    page.wait_for_timeout(2000)
+                    
+                    # 获取显示的新闻
+                    html = page.content()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # 查找新闻链接
+                    news_links = soup.find_all('a', href=re.compile(r'/news|/press|/release'))
+                    
+                    for link in news_links[:3]:  # 每天最多3条
+                        title = self.clean_text(link.get_text())
+                        if not title or len(title) < 10:
+                            continue
                         
-            except Exception as e:
-                continue
+                        href = link.get('href', '')
+                        if not href.startswith('http'):
+                            detail_url = urljoin(url, href)
+                        else:
+                            detail_url = href
+                        
+                        print(f"      找到新闻: {title[:50]}...")
+                        
+                        # 获取详情内容
+                        content = self._fetch_detail(detail_url)
+                        if content:
+                            items.append(ContentItem(
+                                title=title,
+                                summary=content[:600],
+                                date=date_str,
+                                url=detail_url,
+                                source="Criteo"
+                            ))
+                            print(f"        ✓ 已添加")
+                            
+                except Exception as e:
+                    print(f"    处理日期出错: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Playwright 错误: {e}")
+        finally:
+            page.close()
         
+        print(f"    Criteo 总计: {len(items)} 条")
         return items
     
     def fetch_taboola(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:

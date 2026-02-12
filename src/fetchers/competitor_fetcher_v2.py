@@ -76,6 +76,7 @@ class CompetitorFetcherV2(BaseFetcher):
         items = []
         html = self.fetch(base_url)
         if not html:
+            print("    ✗ 无法获取页面")
             return items
             
         soup = BeautifulSoup(html, 'html.parser')
@@ -93,8 +94,12 @@ class CompetitorFetcherV2(BaseFetcher):
         for selector in selectors:
             links = soup.select(selector)
             if links:
-                self.log(f"TTD 使用选择器: {selector}, 找到 {len(links)} 个")
+                print(f"    使用选择器: {selector}, 找到 {len(links)} 个链接")
                 break
+        
+        if not links:
+            print("    ✗ 未找到任何链接")
+            return items
         
         for link in links[:15]:
             try:
@@ -111,10 +116,27 @@ class CompetitorFetcherV2(BaseFetcher):
                 # 尝试从链接或父元素获取日期
                 date_str = self._extract_date_from_element(link) or self._extract_date_from_url(href)
                 
-                self.log(f"TTD: {title[:40]}... | 日期: {date_str}")
+                # 日期解析失败时，尝试从详情页获取
+                if not date_str:
+                    print(f"    尝试从详情页获取日期: {title[:40]}...")
+                    content = self._fetch_detail_content(detail_url)
+                    if content:
+                        # 尝试从内容中提取日期
+                        date_match = __import__('re').search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', content[:1000])
+                        if date_match:
+                            date_str = f"{date_match.group(1)}-{int(date_match.group(2)):02d}-{int(date_match.group(3)):02d}"
+                    if date_str:
+                        print(f"      从详情页获取到日期: {date_str}")
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
-                    # 获取详情页内容
+                # 如果还是没有日期，默认使用今天（作为备选）
+                if not date_str:
+                    from datetime import datetime
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                    print(f"    警告: 未找到日期，使用今天: {title[:40]}...")
+                
+                # 检查日期是否在窗口内
+                if self.is_in_date_window(date_str, window_start, window_end):
+                    # 获取详情页内容（如果还没有获取）
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -124,12 +146,12 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="TTD"
                         ))
-                        self.log(f"  -> 已添加 (日期 {date_str} 在窗口内)")
-                elif date_str:
-                    self.log(f"  -> 跳过 (日期 {date_str} 不在窗口)")
+                        print(f"    ✓ 已添加: {title[:50]}... ({date_str})")
+                else:
+                    print(f"    - 跳过 (日期 {date_str} 不在窗口 {window_start.date()} ~ {window_end.date()})")
                     
             except Exception as e:
-                self.log(f"处理条目出错: {e}")
+                print(f"    ✗ 处理条目出错: {e}")
                 continue
                 
         return items
