@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from fetchers.industry_fetcher import IndustryFetcher
 
 window_end = datetime.now()
-window_start = window_end - timedelta(days=7)
+window_start = window_end - timedelta(days=14)
 
 print("="*70)
 print("抓取行业资讯")
