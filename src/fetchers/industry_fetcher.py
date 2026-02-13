@@ -1,11 +1,12 @@
 """
 行业资讯抓取器
-针对 5 个子模块的抓取实现
+简化版：AdExchanger 抓 Popular Top 5，Search Engine Land 抓最新 3 条
 """
 
 import re
 from datetime import datetime
 from typing import List, Dict
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -19,21 +20,7 @@ from config.settings import INDUSTRY_SOURCES
 
 
 class IndustryFetcher(BaseFetcher):
-    """行业资讯抓取器"""
-    
-    def __init__(self):
-        super().__init__()
-        self.stealth_fetcher = None
-    
-    def _get_stealth_fetcher(self):
-        """延迟初始化 Stealth Fetcher"""
-        if self.stealth_fetcher is None:
-            try:
-                from .stealth_fetcher import StealthFetcher
-                self.stealth_fetcher = StealthFetcher()
-            except Exception as e:
-                print(f"    [!] Stealth 初始化失败: {e}")
-        return self.stealth_fetcher
+    """行业资讯抓取器 - 简化版"""
     
     def fetch_all(self, window_start: datetime, window_end: datetime) -> Dict[str, List[ContentItem]]:
         """
@@ -44,99 +31,31 @@ class IndustryFetcher(BaseFetcher):
         """
         results = {}
         
-        for module_name, config in INDUSTRY_SOURCES.items():
-            print(f"  [行业] {config['name']}...")
-            try:
-                # 先用普通方式抓取
-                items = self._fetch_module(config, window_start, window_end)
-                
-                # 如果 Search Engine Land 没抓到，尝试 stealth 模式
-                if config['name'] == 'Others' and len(items) == 0:
-                    print(f"    尝试 Stealth 模式...")
-                    stealth = self._get_stealth_fetcher()
-                    if stealth:
-                        items = self._fetch_with_stealth(config, window_start, window_end, stealth)
-                
-                results[config['name']] = items
-                print(f"    ✓ {len(items)} 条")
-            except Exception as e:
-                print(f"    ✗ 失败: {str(e)[:80]}")
-                results[config['name']] = []
+        # 抓取 AdExchanger Popular
+        print(f"  [行业] AdExchanger Popular...")
+        try:
+            items = self._fetch_adexchanger_popular(window_start, window_end)
+            results['AdExchanger'] = items
+            print(f"    ✓ {len(items)} 条")
+        except Exception as e:
+            print(f"    ✗ 失败: {str(e)[:80]}")
+            results['AdExchanger'] = []
         
-        # 关闭 stealth fetcher
-        if self.stealth_fetcher:
-            self.stealth_fetcher.close()
+        # 抓取 Search Engine Land 最新
+        print(f"  [行业] Search Engine Land...")
+        try:
+            items = self._fetch_searchengineland_latest(window_start, window_end)
+            results['Search Engine Land'] = items
+            print(f"    ✓ {len(items)} 条")
+        except Exception as e:
+            print(f"    ✗ 失败: {str(e)[:80]}")
+            results['Search Engine Land'] = []
         
         return results
     
-    def _fetch_with_stealth(self, config: dict, window_start: datetime, window_end: datetime, stealth) -> List[ContentItem]:
-        """使用 stealth 模式抓取"""
-        url = config["url"]
-        max_items = config.get("max_items", 3)
-        
-        html = stealth.fetch_page(url, wait_for="article", timeout=60000)
-        if not html:
-            return []
-        
-        soup = BeautifulSoup(html, 'html.parser')
-        items = []
-        
-        # Search Engine Land 使用 article.stream-article
-        articles = soup.find_all('article', class_='stream-article')
-        print(f"    Stealth 找到 {len(articles)} 篇文章")
-        
-        for article in articles[:max_items]:
-            try:
-                title_elem = article.find(['h2', 'h3', 'h1'])
-                if not title_elem:
-                    continue
-                
-                link_elem = title_elem.find('a', href=True)
-                if not link_elem:
-                    continue
-                
-                title = stealth.clean_text(link_elem.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                detail_url = urljoin(url, link_elem['href'])
-                
-                # 获取日期
-                date_str = self._extract_sel_date(article)
-                if not date_str or not stealth.is_in_date_window(date_str, window_start, window_end):
-                    continue
-                
-                print(f"    Stealth 处理: {title[:50]}... ({date_str})")
-                
-                # 获取详情页内容
-                content = stealth._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title,
-                        summary=content[:500],
-                        date=date_str,
-                        url=detail_url,
-                        source=config['name']
-                    ))
-                    print(f"      ✓ 已添加")
-                    
-            except Exception as e:
-                print(f"    Stealth 处理出错: {e}")
-                continue
-        
-        return items
-    
-    def _fetch_module(self, config: dict, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """
-        抓取单个模块
-        :param config: 模块配置
-        :param window_start: 窗口开始日期
-        :param window_end: 窗口结束日期
-        :return: 内容列表
-        """
-        url = config["url"]
-        max_items = config.get("max_items", 3)
-        
+    def _fetch_adexchanger_popular(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 AdExchanger Popular 前 5 条"""
+        url = 'https://www.adexchanger.com/'
         html = self.fetch(url)
         if not html:
             return []
@@ -144,95 +63,80 @@ class IndustryFetcher(BaseFetcher):
         soup = BeautifulSoup(html, 'html.parser')
         items = []
         
-        # 根据网站类型选择不同的解析策略
-        if "adexchanger.com" in url:
-            items = self._parse_adexchanger(soup, url, config["name"], window_start, window_end, max_items)
-        elif "searchengineland.com" in url:
-            items = self._parse_searchengineland(soup, url, config["name"], window_start, window_end, max_items)
+        # 找 Popular 区块
+        popular_heading = soup.find(['h2', 'h3', 'h4'], string=re.compile('popular', re.I))
+        if not popular_heading:
+            return []
         
-        return items
-    
-    def _parse_adexchanger(self, soup: BeautifulSoup, base_url: str, module_name: str, 
-                           window_start: datetime, window_end: datetime, max_items: int) -> List[ContentItem]:
-        """
-        解析 AdExchanger 网站
-        关键：文章容器是 div.adx-snippet，日期只在详情页
-        """
-        items = []
+        parent = popular_heading.find_parent(['aside', 'div', 'section'])
+        if not parent:
+            return []
         
-        # AdExchanger 使用 div.adx-snippet 作为文章容器
-        articles = soup.find_all('div', class_='adx-snippet')
-        if not articles:
-            # 备选选择器
-            articles = soup.find_all('div', class_=re.compile('post|entry|card|article'))
-        if not articles:
-            articles = soup.find_all('article')
+        ol = parent.find('ol', class_=re.compile('list-ordered'))
+        if not ol:
+            return []
         
-        print(f"    找到 {len(articles)} 篇文章")
+        # 取前 5 条
+        lis = ol.find_all('li', limit=5)
+        print(f"    找到 {len(lis)} 条 Popular 文章")
         
-        # 只处理前 10 篇文章，避免超时
-        for article in articles[:10]:
-            if len(items) >= max_items:
-                break
-            
+        for li in lis:
             try:
-                # 获取标题和链接 - 在 .link-post 中
-                link_elem = article.find('a', class_='link-post', href=True)
-                if not link_elem:
-                    # 备选：在 h2/h3 中找链接
-                    title_elem = article.find(['h2', 'h3', 'h1'])
-                    if title_elem:
-                        link_elem = title_elem.find('a', href=True)
-                
-                if not link_elem:
+                # 在 h3 中找标题和链接
+                h3 = li.find('h3')
+                if not h3:
                     continue
                 
-                title = self.clean_text(link_elem.get_text())
+                link = h3.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
                 if not title or len(title) < 10:
                     continue
                 
-                detail_url = self.normalize_url(base_url, link_elem['href'])
+                detail_url = link['href']
                 
-                # AdExchanger 日期只在详情页，必须先获取详情页
-                print(f"    [{len(items)+1}/{max_items}] 获取详情页: {title[:40]}...")
+                # 获取分类
+                category_elem = li.find('a', class_='link-label')
+                category = category_elem.get_text(strip=True) if category_elem else ''
+                
+                print(f"    处理: {title[:50]}...")
+                
+                # 获取详情页内容和日期
                 detail_html = self.fetch(detail_url)
                 if not detail_html:
-                    print(f"      ✗ 无法获取详情页")
                     continue
                 
-                # 从详情页提取日期
-                date_str = self._extract_adexchanger_date_from_html(detail_html)
-                
+                date_str = self._extract_adexchanger_date(detail_html)
                 if not date_str:
-                    print(f"      ✗ 未找到日期")
                     continue
                 
+                # 检查日期窗口
                 if not self.is_in_date_window(date_str, window_start, window_end):
                     print(f"      - 日期 {date_str} 不在窗口内")
                     continue
                 
-                # 提取详情页内容
                 content = self._extract_adexchanger_content(detail_html)
                 if content:
+                    # 在标题前加上分类
+                    full_title = f"[{category}] {title}" if category else title
                     items.append(ContentItem(
-                        title=title,
+                        title=full_title,
                         summary=content[:500],
                         date=date_str,
                         url=detail_url,
-                        source=module_name
+                        source='AdExchanger'
                     ))
                     print(f"      ✓ 已添加 ({date_str})")
-                else:
-                    print(f"      ✗ 无法提取内容")
-                    
+                
             except Exception as e:
-                print(f"    处理文章出错: {e}")
                 continue
         
         return items
     
-    def _extract_adexchanger_date_from_html(self, html: str) -> str:
-        """从 AdExchanger 详情页 HTML 提取日期"""
+    def _extract_adexchanger_date(self, html: str) -> str:
+        """从 AdExchanger 详情页提取日期"""
         soup = BeautifulSoup(html, 'html.parser')
         
         # 方法1: time 标签
@@ -240,8 +144,7 @@ class IndustryFetcher(BaseFetcher):
         if time_elem:
             datetime_attr = time_elem.get('datetime', '')
             if datetime_attr:
-                # 解析 2026-02-12T01:00:00-05:00 格式
-                match = __import__('re').match(r'(\d{4}-\d{2}-\d{2})', datetime_attr)
+                match = re.match(r'(\d{4}-\d{2}-\d{2})', datetime_attr)
                 if match:
                     return match.group(1)
             date_text = time_elem.get_text()
@@ -255,11 +158,9 @@ class IndustryFetcher(BaseFetcher):
         """提取 AdExchanger 详情页内容"""
         soup = BeautifulSoup(html, 'html.parser')
         
-        # 移除脚本和样式
         for script in soup(["script", "style", "nav", "header", "footer", "aside"]):
             script.decompose()
         
-        # 找到主要内容
         content_elem = (
             soup.find('div', class_=re.compile('entry-content|post-content|article-content')) or
             soup.find('article') or
@@ -268,7 +169,6 @@ class IndustryFetcher(BaseFetcher):
         )
         
         if content_elem:
-            # 获取段落文本
             paragraphs = content_elem.find_all(['p', 'h2', 'h3', 'h4'])
             if paragraphs:
                 text = ' '.join([p.get_text(strip=True) for p in paragraphs[:10]])
@@ -279,56 +179,44 @@ class IndustryFetcher(BaseFetcher):
         
         return ""
     
-    def _parse_searchengineland(self, soup: BeautifulSoup, base_url: str, module_name: str,
-                                window_start: datetime, window_end: datetime, max_items: int) -> List[ContentItem]:
-        """
-        解析 Search Engine Land 网站
-        关键：文章容器是 article.stream-article
-        """
+    def _fetch_searchengineland_latest(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Search Engine Land 最新 3 条"""
+        url = 'https://searchengineland.com/latest-posts'
+        html = self.fetch(url)
+        if not html:
+            return []
+        
+        soup = BeautifulSoup(html, 'html.parser')
         items = []
         
-        # Search Engine Land 使用 article.stream-article
-        articles = soup.find_all('article', class_='stream-article')
-        if not articles:
-            # 备选
-            articles = soup.find_all('article', class_=re.compile('post|article'))
-        if not articles:
-            articles = soup.find_all('div', class_=re.compile('post|article|card'))
-        
+        # 找文章列表
+        articles = soup.find_all('article', class_='stream-article', limit=3)
         print(f"    找到 {len(articles)} 篇文章")
         
         for article in articles:
-            if len(items) >= max_items:
-                break
-            
             try:
-                # 获取标题和链接
-                title_elem = article.find(['h2', 'h3', 'h1'])
+                title_elem = article.find(['h2', 'h3'])
                 if not title_elem:
                     continue
                 
-                link_elem = title_elem.find('a', href=True)
-                if not link_elem:
-                    link_elem = article.find('a', href=True, class_=re.compile('title'))
-                
-                if not link_elem:
+                link = title_elem.find('a', href=True)
+                if not link:
                     continue
                 
-                title = self.clean_text(link_elem.get_text())
+                title = self.clean_text(link.get_text())
                 if not title or len(title) < 10:
                     continue
                 
-                detail_url = self.normalize_url(base_url, link_elem['href'])
+                detail_url = link['href']
                 
-                # 获取日期
+                # 提取日期
                 date_str = self._extract_sel_date(article)
-                
                 if not date_str:
-                    print(f"    未找到日期: {title[:50]}...")
                     continue
                 
+                # 检查日期窗口
                 if not self.is_in_date_window(date_str, window_start, window_end):
-                    print(f"    日期 {date_str} 不在窗口内: {title[:50]}...")
+                    print(f"    - 日期 {date_str} 不在窗口内: {title[:40]}...")
                     continue
                 
                 print(f"    处理: {title[:50]}... ({date_str})")
@@ -343,19 +231,13 @@ class IndustryFetcher(BaseFetcher):
                             summary=content[:500],
                             date=date_str,
                             url=detail_url,
-                            source=module_name
+                            source='Search Engine Land'
                         ))
                         print(f"      ✓ 已添加")
-                    else:
-                        print(f"      ✗ 无法提取内容")
-                else:
-                    print(f"      ✗ 无法获取详情页")
-                    
+                
             except Exception as e:
-                print(f"    处理文章出错: {e}")
                 continue
         
-        print(f"    总计: {len(items)} 条")
         return items
     
     def _extract_sel_date(self, article) -> str:
@@ -372,7 +254,7 @@ class IndustryFetcher(BaseFetcher):
             if parsed:
                 return parsed
         
-        # 方法2: 查找包含 "Feb 11, 2026" 格式的文本
+        # 方法2: 查找文本日期
         date_pattern = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}'
         date_matches = article.find_all(string=re.compile(date_pattern, re.IGNORECASE))
         for match in date_matches:
@@ -395,11 +277,9 @@ class IndustryFetcher(BaseFetcher):
         """提取 Search Engine Land 详情页内容"""
         soup = BeautifulSoup(html, 'html.parser')
         
-        # 移除脚本和样式
         for script in soup(["script", "style", "nav", "header", "footer", "aside"]):
             script.decompose()
         
-        # 找到主要内容
         content_elem = (
             soup.find('div', class_=re.compile('entry-content|post-content|article-body')) or
             soup.find('article') or

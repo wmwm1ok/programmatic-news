@@ -101,32 +101,19 @@ COMPETITOR_SOURCES = {
 }
 
 # =============================================================================
-# 行业资讯来源配置（5个子模块）
+# 行业资讯来源配置（2个来源）
+# - AdExchanger: 抓 Popular 前 5 条
+# - Search Engine Land: 抓最新 3 条
 # =============================================================================
 
 INDUSTRY_SOURCES = {
-    "Publisher": {
-        "name": "Publisher",
-        "url": "https://www.adexchanger.com/publishers/",
-        "max_items": 3,
+    "AdExchanger": {
+        "name": "AdExchanger",
+        "url": "https://www.adexchanger.com/",
+        "max_items": 5,
     },
-    "Technology": {
-        "name": "Technology",
-        "url": "https://www.adexchanger.com/technology/",
-        "max_items": 3,
-    },
-    "Platform": {
-        "name": "Platform",
-        "url": "https://www.adexchanger.com/platforms/",
-        "max_items": 3,
-    },
-    "Artificial Intelligence": {
-        "name": "Artificial Intelligence",
-        "url": "https://www.adexchanger.com/artificial-intelligence/",
-        "max_items": 3,
-    },
-    "Others": {
-        "name": "Others",
+    "Search Engine Land": {
+        "name": "Search Engine Land",
         "url": "https://searchengineland.com/latest-posts",
         "max_items": 3,
     },
