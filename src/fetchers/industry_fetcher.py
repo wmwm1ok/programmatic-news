@@ -255,10 +255,15 @@ class IndustryFetcher(BaseFetcher):
                     if 'searchengineland' not in detail_url.lower():
                         continue
                     
-                    # 检查日期窗口
+                    # 检查日期窗口（如果没有日期或日期在窗口内都保留）
                     if date_str and not self.is_in_date_window(date_str, window_start, window_end):
                         print(f"    - 日期 {date_str} 不在窗口内: {title[:40]}...")
                         continue
+                    
+                    # 如果无法解析日期，默认保留（可能是最近的新闻）
+                    if not date_str:
+                        date_str = window_end.strftime('%Y-%m-%d')
+                        print(f"    ! 无法解析日期，使用当前日期: {title[:40]}...")
                     
                     print(f"    处理: {title[:50]}... ({date_str})")
                     
