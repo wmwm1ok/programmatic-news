@@ -208,10 +208,16 @@ class StealthFetcher:
                     html = page.content()
                     soup = BeautifulSoup(html, 'html.parser')
                     
-                    # 查找新闻链接
+                    # 查找新闻链接 - 多种选择器
                     news_links = soup.find_all('a', href=re.compile(r'/news/|/press/|/release/'))
+                    if not news_links:
+                        # 备选：找包含新闻相关文本的链接
+                        all_links = soup.find_all('a', href=True)
+                        news_links = [l for l in all_links if len(l.get_text(strip=True)) > 20]
                     
-                    for link in news_links[:3]:
+                    print(f"      找到 {len(news_links)} 个新闻链接")
+                    
+                    for link in news_links[:5]:
                         title = self.clean_text(link.get_text())
                         if not title or len(title) < 10 or 'photo' in title.lower():
                             continue
@@ -288,11 +294,17 @@ class StealthFetcher:
                 
                 detail_url = urljoin(url, link['href'])
                 
-                # 从URL提取日期
-                date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', detail_url)
-                if date_match:
-                    date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
-                else:
+                # 从卡片中提取日期
+                date_str = ""
+                date_elem = card.find(class_=re.compile('date|time'))
+                if date_elem:
+                    date_str = self.parse_date(date_elem.get_text()) or ""
+                
+                # 如果卡片没日期，尝试从URL提取
+                if not date_str:
+                    date_str = self._extract_date_from_url(detail_url)
+                
+                if not date_str:
                     continue
                 
                 if not self.is_in_date_window(date_str, window_start, window_end):
@@ -456,8 +468,15 @@ class StealthFetcher:
         
         soup = BeautifulSoup(html, 'html.parser')
         
-        # 查找新闻文章
-        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('news|card|post'))
+        # 查找新闻文章 - 多种选择器
+        articles = soup.find_all('article')
+        if not articles:
+            articles = soup.find_all('div', class_=re.compile('news|card|post|item'))
+        if not articles:
+            # 备选：找包含链接的div
+            all_divs = soup.find_all('div')
+            articles = [d for d in all_divs if d.find('a', href=True) and len(d.get_text(strip=True)) > 50]
+        
         print(f"    找到 {len(articles)} 篇文章")
         
         for article in articles[:8]:
@@ -564,53 +583,29 @@ class StealthFetcher:
                     if date_elem:
                         date_str = self.parse_date(date_elem.get_text()) or ""
                     
-                    # 如果在列表页没日期，进入详情页
-                    if not date_str:
-                        detail_page = self.context.new_page()
-                        try:
-                            detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
-                            detail_page.wait_for_timeout(2000)
-                            
-                            detail_html = detail_page.content()
-                            detail_soup = BeautifulSoup(detail_html, 'html.parser')
-                            
-                            # 查找日期
-                            time_tag = detail_soup.find('time')
-                            if time_tag:
-                                datetime_attr = time_tag.get('datetime', '')
-                                match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
-                                if match:
-                                    date_str = match.group(0)
-                            
-                            if not date_str:
-                                date_div = detail_soup.find(class_=re.compile('date'))
-                                if date_div:
-                                    date_str = self.parse_date(date_div.get_text()) or ""
-                            
-                            detail_page.close()
-                        except:
-                            try:
-                                detail_page.close()
-                            except:
-                                pass
-                    
                     if not date_str:
                         continue
                     
                     if not self.is_in_date_window(date_str, window_start, window_end):
                         continue
                     
+                    # 从元素中提取摘要文本
+                    content = ""
+                    desc_elem = item_elem.find(class_=re.compile('desc|summary|content'))
+                    if desc_elem:
+                        content = self.clean_text(desc_elem.get_text())
+                    if not content:
+                        content = title
+                    
                     print(f"    ✓ {title[:50]}... ({date_str})")
                     
-                    content = self._fetch_detail(detail_url)
-                    if content:
-                        items.append(ContentItem(
-                            title=title,
-                            summary=content[:600],
-                            date=date_str,
-                            url=detail_url,
-                            source="Zeta Global"
-                        ))
+                    items.append(ContentItem(
+                        title=title,
+                        summary=content[:600],
+                        date=date_str,
+                        url=detail_url,
+                        source="Zeta Global"
+                    ))
                     
                     # 限制最多3条
                     if len(items) >= 3:
@@ -1626,10 +1621,14 @@ class StealthFetcher:
         return False
     
     def _extract_date_from_url(self, url: str) -> str:
-        """从URL提取日期"""
-        match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', url)
+        """从URL提取日期 - 支持多种格式"""
+        # TTD 格式: /YYYY/DD/MM/ (日在前)
+        match = re.search(r'/\d{4}/\d{2}/\d{2}/', url)
         if match:
-            return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+            parts = match.group(0).strip('/').split('/')
+            if len(parts) == 3:
+                year, day, month = parts[0], parts[1], parts[2]
+                return f"{year}-{month}-{day}"
         return ""
     
     def _extract_date_from_element(self, elem) -> str:
