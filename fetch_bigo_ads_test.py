@@ -28,7 +28,7 @@ url = "https://www.bigoads.com/resources/blog"
 
 # 计算14天前到今天的时间窗口
 today = datetime(2026, 2, 12)  # 模拟今天为2月12日
-window_start = today - timedelta(days=14)
+window_start = today - timedelta(days=7)
 window_end = today
 
 target_start = window_start.strftime("%Y-%m-%d")
