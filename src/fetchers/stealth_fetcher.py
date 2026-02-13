@@ -162,101 +162,62 @@ class StealthFetcher:
         return ""
     
     def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Criteo - 使用官网 Investor Room"""
+        """抓取 Criteo - 使用官网新闻列表"""
         items = []
-        url = "https://criteo.investorroom.com/releases"
+        url = "https://www.criteo.com/news/"
         print("  [Stealth] 抓取 Criteo...")
         
-        if not self._init_browser():
+        html = self.fetch_page(url, timeout=60000)
+        if not html:
             return items
         
-        page = self.context.new_page()
-        try:
-            print("    访问投资者页面...")
-            page.goto(url, wait_until="domcontentloaded", timeout=120000)
-            self._random_delay(5000, 8000)
-            
-            # 查找日期按钮
-            date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
-            print(f"    找到 {len(date_buttons)} 个日期")
-            
-            if len(date_buttons) == 0:
-                print("    ⚠️ 未找到日期按钮")
-                return items
-            
-            processed_titles = set()
-            
-            for i, button in enumerate(date_buttons[:15]):
-                try:
-                    date_text = button.inner_text().strip()
-                    if not date_text.isdigit():
-                        continue
-                    
-                    day = int(date_text)
-                    now = datetime.now()
-                    date_str = f"{now.year}-{now.month:02d}-{day:02d}"
-                    
-                    if not self.is_in_date_window(date_str, window_start, window_end):
-                        continue
-                    
-                    print(f"    [{i+1}] 处理日期: {date_str}")
-                    
-                    # 点击日期
-                    button.evaluate('el => { el.scrollIntoView({block: "center"}); el.click(); }')
-                    self._random_delay(3000, 5000)
-                    
-                    html = page.content()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # 查找新闻链接 - 多种选择器
-                    news_links = soup.find_all('a', href=re.compile(r'/news/|/press/|/release/'))
-                    if not news_links:
-                        # 备选：找包含新闻相关文本的链接
-                        all_links = soup.find_all('a', href=True)
-                        news_links = [l for l in all_links if len(l.get_text(strip=True)) > 20]
-                    
-                    print(f"      找到 {len(news_links)} 个新闻链接")
-                    
-                    for link in news_links[:5]:
-                        title = self.clean_text(link.get_text())
-                        if not title or len(title) < 10 or 'photo' in title.lower():
-                            continue
-                        
-                        # 去重
-                        if title in processed_titles:
-                            continue
-                        processed_titles.add(title)
-                        
-                        # 过滤非主体新闻
-                        if self._is_not_main_subject(title, 'Criteo'):
-                            print(f"      - 跳过(非主体): {title[:40]}...")
-                            continue
-                        
-                        href = link.get('href', '')
-                        detail_url = urljoin(url, href)
-                        
-                        content = self._fetch_detail(detail_url)
-                        if content:
-                            items.append(ContentItem(
-                                title=title, summary=content[:600], date=date_str,
-                                url=detail_url, source="Criteo"
-                            ))
-                            print(f"      ✓ {title[:40]}...")
-                        
-                        # 限制最多3条
-                        if len(items) >= 3:
-                            break
-                    
-                    if len(items) >= 3:
-                        break
-                        
-                except Exception as e:
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # 查找新闻文章
+        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('news|post|item'))
+        print(f"    找到 {len(articles)} 篇文章")
+        
+        for article in articles[:8]:
+            try:
+                link = article.find('a', href=True)
+                if not link:
                     continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                # 过滤非主体新闻
+                if self._is_not_main_subject(title, 'Criteo'):
+                    print(f"    - 跳过(非主体): {title[:50]}...")
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 提取日期
+                date_str = self._extract_date_from_element(article) or self._extract_date_from_url(detail_url)
+                if not date_str:
+                    print(f"    ! 无法提取日期，使用当前日期")
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    print(f"    - 日期不在窗口: {date_str}")
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Criteo"
+                    ))
+                    print(f"    ✓ {title[:50]}... ({date_str})")
+                
+                # 限制最多3条
+                if len(items) >= 3:
+                    break
                     
-        except Exception as e:
-            print(f"    ✗ Criteo 错误: {e}")
-        finally:
-            page.close()
+            except Exception as e:
+                continue
         
         print(f"    Criteo: {len(items)} 条")
         return items
@@ -304,10 +265,15 @@ class StealthFetcher:
                 if not date_str:
                     date_str = self._extract_date_from_url(detail_url)
                 
-                if not date_str:
-                    continue
+                # 打印调试信息
+                if date_str:
+                    print(f"      日期: {date_str}")
+                else:
+                    print(f"      无法提取日期，使用当前日期")
+                    date_str = datetime.now().strftime('%Y-%m-%d')
                 
                 if not self.is_in_date_window(date_str, window_start, window_end):
+                    print(f"      - 日期不在窗口: {date_str}")
                     continue
                 
                 content = self._fetch_detail(detail_url)
@@ -473,9 +439,16 @@ class StealthFetcher:
         if not articles:
             articles = soup.find_all('div', class_=re.compile('news|card|post|item'))
         if not articles:
-            # 备选：找包含链接的div
-            all_divs = soup.find_all('div')
-            articles = [d for d in all_divs if d.find('a', href=True) and len(d.get_text(strip=True)) > 50]
+            # 备选：找所有链接，筛选可能是新闻的
+            all_links = soup.find_all('a', href=re.compile('/news/|/blog/|/press/'))
+            articles = []
+            for link in all_links:
+                parent = link.find_parent(['article', 'div', 'li'])
+                if parent:
+                    articles.append(parent)
+                else:
+                    # 如果找不到父元素，创建一个包装
+                    articles.append(link)
         
         print(f"    找到 {len(articles)} 篇文章")
         
@@ -507,7 +480,15 @@ class StealthFetcher:
                     # 从URL尝试
                     date_str = self._extract_date_from_url(detail_url)
                 
-                if not date_str or not self.is_in_date_window(date_str, window_start, window_end):
+                # 打印调试信息
+                if date_str:
+                    print(f"      日期: {date_str}")
+                else:
+                    print(f"      无法提取日期，尝试用当前日期")
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    print(f"      - 日期不在窗口")
                     continue
                 
                 content = self._fetch_detail(detail_url)
