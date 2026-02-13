@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from fetchers.stealth_fetcher import StealthFetcher
 
 window_end = datetime.now()
-window_start = window_end - timedelta(days=14)
+window_start = window_end - timedelta(days=30)  # Moloco 使用30天窗口
 
 print("="*70)
 print("抓取 Moloco")
