@@ -20,7 +20,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.company }}-only || main
+          ref: main
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,12 +34,14 @@ jobs:
           pip install playwright
           playwright install chromium
       
-      - name: Fetch ${{ inputs.company }} using ${{ inputs.fetcher }}
+      - name: Fetch ${{ inputs.company }}
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           mkdir -p output
-          python fetch_${{ inputs.company }}_only.py
+          # 将公司名转换为脚本名（小写，空格变下划线）
+          COMPANY_KEY=$(echo "${{ inputs.company }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '_')
+          python fetch_${COMPANY_KEY}_only.py
       
       - name: Upload result
         uses: actions/upload-artifact@v4
