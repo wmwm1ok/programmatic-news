@@ -55,8 +55,8 @@ COMPETITOR_SOURCES = {
     },
     "AppLovin": {
         "name": "AppLovin",
-        "url": "https://www.applovin.com/en/newsroom",
-        "type": "newsroom",
+        "url": "https://investors.applovin.com/",
+        "type": "investor",
     },
     "mobvista": {
         "name": "mobvista",

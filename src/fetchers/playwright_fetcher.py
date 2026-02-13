@@ -283,67 +283,154 @@ class PlaywrightFetcher:
         return items
     
     def fetch_applovin(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 AppLovin"""
+        """抓取 AppLovin - 投资者网站 https://investors.applovin.com/
+        日期在 evergreen-item-date-time / evergreen-news-date 类中，格式 "February 11, 2026"
+        """
         items = []
         url = COMPETITOR_SOURCES["AppLovin"]["url"]
         
         print("  [Playwright] 抓取 AppLovin...")
-        html = self.fetch_page(url, wait_for="article, .news-item, .post")
-        if not html:
+        
+        # 独立启动浏览器（需要特殊参数）
+        try:
+            from playwright.sync_api import sync_playwright
+            pw = sync_playwright().start()
+            browser = pw.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
+            context = browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            )
+        except Exception as e:
+            print(f"    ✗ 浏览器启动失败: {e}")
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
+        page = context.new_page()
+        processed_urls = set()
         
-        # 尝试多种选择器
-        articles = (soup.find_all('article') or 
-                   soup.select('.news-item') or 
-                   soup.select('.post') or
-                   soup.select('[class*="news"]') or
-                   soup.select('[class*="post"]'))
-        
-        print(f"    找到 {len(articles)} 篇文章")
-        
-        for article in articles[:10]:
-            try:
-                link_elem = article.find('a', href=True)
-                if not link_elem:
-                    continue
-                
-                detail_url = urljoin(url, link_elem['href'])
-                title_elem = article.find(['h2', 'h3', 'h1', 'h4']) or link_elem
-                title = self.clean_text(title_elem.get_text())
-                
-                if not title or len(title) < 10:
-                    continue
-                
-                # 获取日期
-                date_elem = (article.find('time') or 
-                            article.find(class_=re.compile('date|time')) or
-                            article.find(string=re.compile(r'\w+ \d{1,2},? \d{4}')))
-                
-                date_str = ""
-                if date_elem:
-                    date_text = date_elem.get_text() if hasattr(date_elem, 'get_text') else str(date_elem)
-                    date_str = self.parse_date(date_text)
-                
-                print(f"    - {title[:40]}... | 日期: {date_str}")
-                
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
-                    content = self._fetch_detail(detail_url)
-                    if content:
-                        items.append(ContentItem(
-                            title=title,
-                            summary=content[:600],
-                            date=date_str,
-                            url=detail_url,
-                            source="AppLovin"
-                        ))
-                        print(f"      -> 已添加")
+        try:
+            # 使用 networkidle 等待页面完全加载
+            page.goto(url, wait_until="networkidle", timeout=90000)
+            page.wait_for_timeout(5000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找日期元素 (evergreen-item-date-time 或 evergreen-news-date)
+            date_divs = soup.find_all('div', class_=re.compile('evergreen-item-date-time|evergreen-news-date'))
+            print(f"    找到 {len(date_divs)} 个日期元素")
+            
+            for date_div in date_divs[:10]:
+                try:
+                    date_text = date_div.get_text(strip=True)
+                    
+                    # 解析日期 "February 11, 2026" -> "2026-02-11"
+                    match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                    if not match:
+                        continue
+                    
+                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                    month_num = months.get(match.group(1).lower(), '01')
+                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                    
+                    # 查找对应的新闻标题和链接
+                    parent = date_div.find_parent()
+                    if not parent:
+                        continue
+                    
+                    link_elem = parent.find('a', href=True)
+                    if not link_elem:
+                        continue
+                    
+                    href = link_elem.get('href', '')
+                    if not href:
+                        continue
+                    
+                    # 检查是否是新闻链接 (/news/news-details/...)
+                    if '/news/' not in href or '/events-and-presentations/' in href:
+                        continue
+                    
+                    detail_url = urljoin(url, href)
+                    
+                    # 去重
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    title = self.clean_text(link_elem.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                    
+                    # 检查日期窗口
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    if not (window_start <= date_obj <= window_end):
+                        print(f" - 不在时间窗口")
+                        continue
+                    
+                    # 进入详情页获取内容
+                    detail_page = context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        detail_page.wait_for_timeout(3000)
                         
-            except Exception as e:
-                print(f"    处理出错: {e}")
-                continue
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 提取内容
+                        content = ""
+                        for selector in ['.module_body', '.news-body', '.content', 'article', '.main-content', '.press-release']:
+                            elem = detail_soup.select_one(selector)
+                            if elem:
+                                text = elem.get_text(separator=' ', strip=True)
+                                if len(text) > 200:
+                                    content = self.clean_text(text)
+                                    break
+                        
+                        if not content:
+                            # 备选：移除脚本样式后获取 body
+                            for script in detail_soup(["script", "style", "nav", "header"]):
+                                script.decompose()
+                            body = detail_soup.find('body')
+                            if body:
+                                content = self.clean_text(body.get_text(separator=' ', strip=True))
+                        
+                        if content:
+                            items.append(ContentItem(
+                                title=title,
+                                summary=content[:600],
+                                date=date_str,
+                                url=detail_url,
+                                source="AppLovin"
+                            ))
+                            print(f" ✓ 已添加")
+                        else:
+                            print(f" ✗ 无法提取内容")
+                        
+                        detail_page.close()
+                    except Exception as e:
+                        print(f" ✗ 详情页错误: {e}")
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                    
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ AppLovin 错误: {e}")
+        finally:
+            page.close()
+            browser.close()
+            pw.stop()
         
+        print(f"    AppLovin: {len(items)} 条")
         return items
     
     def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
