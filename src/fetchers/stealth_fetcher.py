@@ -320,8 +320,8 @@ class StealthFetcher:
         try:
             # 使用较长超时和 load 等待，确保 Cloudflare 验证完成
             print("    访问投资者页面...")
-            page.goto(url, wait_until="load", timeout=120000)
-            self._random_delay(5000, 8000)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
             
             html = page.content()
             soup = BeautifulSoup(html, 'html.parser')
@@ -503,59 +503,162 @@ class StealthFetcher:
         return items
     
     def fetch_moloco(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Moloco"""
+        """抓取 Moloco - 从 newsroom 页面获取 press-releases 链接
+        日期在详情页 time 标签中，格式 "January 21, 2026"
+        """
         items = []
         url = COMPETITOR_SOURCES["Moloco"]["url"]
         print("  [Stealth] 抓取 Moloco...")
         
-        html = self.fetch_page(url, wait_for="article", timeout=60000)
-        if not html:
+        if not self._init_browser():
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('post|card'))
-        print(f"    找到 {len(articles)} 篇文章")
+        page = self.context.new_page()
+        processed_urls = set()
         
-        for article in articles[:10]:
-            try:
-                link = article.find('a', href=True)
-                if not link:
-                    continue
-                
-                title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                detail_url = urljoin(url, link['href'])
-                
-                # 尝试获取日期
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text())
-                
-                # 从URL尝试
-                if not date_str:
-                    date_match = re.search(r'/(\d{4})[-/](\d{2})[-/](\d{2})/', detail_url)
-                    if date_match:
-                        date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
-                
-                if not date_str:
-                    date_str = datetime.now().strftime('%Y-%m-%d')
-                
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="Moloco"
-                    ))
-                    print(f"    ✓ {title[:40]}... ({date_str})")
+        try:
+            page.goto(url, wait_until="load", timeout=120000)
+            self._random_delay(5000, 8000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找所有 press-releases 链接
+            all_links = soup.find_all('a', href=True)
+            press_links = [l for l in all_links if '/press-releases/' in l.get('href', '')]
+            
+            # 去重
+            seen_urls = set()
+            unique_links = []
+            for link in press_links:
+                href = link.get('href', '')
+                if href and href not in seen_urls:
+                    seen_urls.add(href)
+                    unique_links.append(link)
+            
+            print(f"    找到 {len(unique_links)} 个 press-releases 链接")
+            
+            for link in unique_links[:10]:
+                try:
+                    href = link.get('href', '')
+                    detail_url = urljoin(url, href)
                     
-            except Exception as e:
-                continue
+                    # 去重检查
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    # 进入详情页获取标题和日期
+                    detail_page = self.context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        detail_page.wait_for_timeout(3000)
+                        
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 获取标题
+                        title = ""
+                        for selector in ['h1', 'h2', '.title', '[class*="title"]']:
+                            elem = detail_soup.select_one(selector)
+                            if elem:
+                                title = self.clean_text(elem.get_text())
+                                if len(title) > 10:
+                                    break
+                        
+                        if not title:
+                            detail_page.close()
+                            continue
+                        
+                        # 获取日期
+                        date_str = ""
+                        time_elem = detail_soup.find('time')
+                        if time_elem:
+                            datetime_attr = time_elem.get('datetime', '')
+                            time_text = time_elem.get_text(strip=True)
+                            
+                            # 尝试标准格式
+                            match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                            if match:
+                                date_str = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                            else:
+                                # 尝试文本格式
+                                match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', time_text, re.IGNORECASE)
+                                if match:
+                                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                                    month_num = months.get(match.group(1).lower(), '01')
+                                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                        
+                        # 备选：从 body 文本查找
+                        if not date_str:
+                            body_text = detail_soup.get_text()[:3000]
+                            match = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', body_text, re.IGNORECASE)
+                            if match:
+                                months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                                         'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                                month_num = months.get(match.group(1).lower(), '01')
+                                date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                        
+                        if not date_str:
+                            detail_page.close()
+                            continue
+                        
+                        print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                        
+                        # 检查日期窗口
+                        if not self.is_in_date_window(date_str, window_start, window_end):
+                            print(f" - 不在窗口")
+                            detail_page.close()
+                            continue
+                        
+                        # 获取内容
+                        content = ""
+                        for selector in ['.content', 'article', '.post-content', '.press-content', 'main']:
+                            elem = detail_soup.select_one(selector)
+                            if elem:
+                                text = elem.get_text(separator=' ', strip=True)
+                                if len(text) > 200:
+                                    content = self.clean_text(text)
+                                    break
+                        
+                        if not content:
+                            # 备选
+                            for script in detail_soup(["script", "style", "nav", "header"]):
+                                script.decompose()
+                            body = detail_soup.find('body')
+                            if body:
+                                content = self.clean_text(body.get_text(separator=' ', strip=True))
+                        
+                        if content:
+                            items.append(ContentItem(
+                                title=title,
+                                summary=content[:600],
+                                date=date_str,
+                                url=detail_url,
+                                source="Moloco"
+                            ))
+                            print(f" ✓ 已添加")
+                        else:
+                            print(f" ✗ 无内容")
+                        
+                        detail_page.close()
+                        
+                    except Exception as e:
+                        print(f" ✗ 详情页错误: {e}")
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Moloco 错误: {e}")
+        finally:
+            page.close()
         
         print(f"    Moloco: {len(items)} 条")
         return items

@@ -65,8 +65,8 @@ COMPETITOR_SOURCES = {
     },
     "Moloco": {
         "name": "Moloco",
-        "url": "https://www.moloco.com/press-releases",
-        "type": "press_releases",
+        "url": "https://www.moloco.com/newsroom",
+        "type": "newsroom",
     },
     "BIGO Ads": {
         "name": "BIGO Ads",
@@ -167,7 +167,7 @@ OUTPUT_CONFIG = {
 }
 
 
-def get_date_window(run_date: datetime = None, days: int = 7):
+def get_date_window(run_date: datetime = None, days: int = 14):
     """
     获取时间窗口
     :param run_date: 运行日期，默认为今天
