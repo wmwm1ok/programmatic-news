@@ -50,6 +50,14 @@
             border-left: 4px solid #1890ff;
         }
         
+        h3 {
+            font-size: 15px;
+            color: #333;
+            margin: 20px 0 12px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e8e8e8;
+        }
+        
         /* 竞品资讯表格样式 */
         .competitor-table {
             width: 100%;
@@ -123,15 +131,6 @@
             margin-bottom: 25px;
         }
         
-        .industry-subsection-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 12px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #e8e8e8;
-        }
-        
         .industry-item {
             padding: 15px;
             background-color: #fafafa;
@@ -154,6 +153,20 @@
             padding: 30px;
             color: #999;
             font-size: 14px;
+        }
+        
+        /* 统计信息 */
+        .stats {
+            background-color: #f0f7ff;
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #555;
+        }
+        
+        .stats strong {
+            color: #1890ff;
         }
         
         /* 页脚 */
@@ -190,39 +203,16 @@
         <h2>二、行业资讯</h2>
         <div class="industry-section">
             
-            <!-- Publisher -->
-            <div class="industry-subsection {{INDUSTRY_PUBLISHER_HIDDEN_CLASS}}">
-                <div class="industry-subsection-title">Publisher</div>
-                {{INDUSTRY_PUBLISHER_ITEMS_HTML}}
-                {{INDUSTRY_PUBLISHER_EMPTY_HTML}}
+            <!-- AdExchanger Popular -->
+            <div class="industry-subsection {{ADEXCHANGER_HIDDEN_CLASS}}">
+                <h3>📰 AdExchanger Popular</h3>
+                {{ADEXCHANGER_ITEMS_HTML}}
             </div>
             
-            <!-- Technology -->
-            <div class="industry-subsection {{INDUSTRY_TECHNOLOGY_HIDDEN_CLASS}}">
-                <div class="industry-subsection-title">Technology</div>
-                {{INDUSTRY_TECHNOLOGY_ITEMS_HTML}}
-                {{INDUSTRY_TECHNOLOGY_EMPTY_HTML}}
-            </div>
-            
-            <!-- Platform -->
-            <div class="industry-subsection {{INDUSTRY_PLATFORM_HIDDEN_CLASS}}">
-                <div class="industry-subsection-title">Platform</div>
-                {{INDUSTRY_PLATFORM_ITEMS_HTML}}
-                {{INDUSTRY_PLATFORM_EMPTY_HTML}}
-            </div>
-            
-            <!-- Artificial Intelligence -->
-            <div class="industry-subsection {{INDUSTRY_AI_HIDDEN_CLASS}}">
-                <div class="industry-subsection-title">Artificial Intelligence</div>
-                {{INDUSTRY_AI_ITEMS_HTML}}
-                {{INDUSTRY_AI_EMPTY_HTML}}
-            </div>
-            
-            <!-- Others -->
-            <div class="industry-subsection {{INDUSTRY_OTHERS_HIDDEN_CLASS}}">
-                <div class="industry-subsection-title">Others</div>
-                {{INDUSTRY_OTHERS_ITEMS_HTML}}
-                {{INDUSTRY_OTHERS_EMPTY_HTML}}
+            <!-- Search Engine Land -->
+            <div class="industry-subsection {{SEL_HIDDEN_CLASS}}">
+                <h3>🔍 Search Engine Land</h3>
+                {{SEL_ITEMS_HTML}}
             </div>
             
         </div>

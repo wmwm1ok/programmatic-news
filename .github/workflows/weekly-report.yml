@@ -1,98 +1,60 @@
-name: Weekly Report Generator
+name: Weekly Report Automation
 
 on:
+  # 定时触发：北京时间每周一早上 8:00
+  # UTC 周一 00:00 = 北京时间周一 08:00 (UTC+8)
   schedule:
-    # 每周一早上9点 UTC（北京时间下午5点）
-    - cron: '0 9 * * 1'
-  workflow_dispatch:  # 允许手动触发
-  push:
-    branches: [ main ]  # 推送时触发（用于测试）
+    - cron: '0 0 * * 1'
+  
+  # 手动触发
+  workflow_dispatch:
+
+env:
+  # Python 版本
+  PYTHON_VERSION: '3.10'
 
 jobs:
-  generate-report:
+  generate-and-send-report:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-    
-    - name: Install Playwright
-      run: |
-        pip install playwright
-        playwright install chromium
-        playwright install-deps chromium
-    
-    - name: Verify Playwright installation
-      run: |
-        python -c "from playwright.sync_api import sync_playwright; print('Playwright installed successfully')"
-    
-    - name: Generate weekly report
-      env:
-        DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        DEEPSEEK_API_BASE: https://api.deepseek.com
-        DEEPSEEK_MODEL: deepseek-chat
-        PYTHONUNBUFFERED: "1"
-      run: |
-        python generate_with_ai.py
-    
-    - name: Check output files
-      if: always()
-      run: |
-        echo "Checking output directory..."
-        ls -la output/ || echo "Output directory not found"
-    
-    - name: Upload report as artifact
-      if: success()
-      uses: actions/upload-artifact@v4
-      with:
-        name: weekly-report-${{ github.run_id }}
-        path: output/*.html
-        retention-days: 30
-    
-    - name: Send email with report
-      if: success()
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: ${{ secrets.SMTP_SERVER }}
-        server_port: ${{ secrets.SMTP_PORT }}
-        username: ${{ secrets.EMAIL_USERNAME }}
-        password: ${{ secrets.EMAIL_PASSWORD }}
-        subject: 竞品周报 ${{ github.run_id }}
-        to: wmwm1ok@gmail.com
-        from: 周报自动化系统 <${{ secrets.EMAIL_USERNAME }}>
-        html_body: 请查看附件中的周报
-        attachments: output/*.html
-      continue-on-error: true
-    
-    - name: Notify on failure
-      if: failure()
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: ${{ secrets.SMTP_SERVER }}
-        server_port: ${{ secrets.SMTP_PORT }}
-        username: ${{ secrets.EMAIL_USERNAME }}
-        password: ${{ secrets.EMAIL_PASSWORD }}
-        subject: 【失败】周报生成失败
-        to: wmwm1ok@gmail.com
-        from: 周报自动化系统 <${{ secrets.EMAIL_USERNAME }}>
-        body: |
-          周报生成失败，请检查日志。
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install chromium
+      
+      - name: Generate and send weekly report
+        env:
+          # DeepSeek API（用于生成中文摘要）
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           
-          运行链接: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      continue-on-error: true
+          # 邮件配置
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM || secrets.EMAIL_USERNAME }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO || 'wangmeng42@baidu.com' }}
+        run: |
+          python run_weekly_report.py
+      
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-report-${{ github.run_id }}
+          path: output/*.html
+          retention-days: 30

@@ -91,46 +91,51 @@ class HTMLRenderer:
     def _render_industry_section(self, items: Dict[str, List[ContentItem]]) -> Dict[str, str]:
         """
         渲染行业资讯区块
-        :param items: {子模块名称: 内容列表}
+        :param items: {来源名称: 内容列表}
         :return: 插槽映射 {插槽名: HTML内容}
         """
-        # 子模块名称到插槽名称的映射
-        module_to_slot = {
-            "Publisher": "INDUSTRY_PUBLISHER",
-            "Technology": "INDUSTRY_TECHNOLOGY",
-            "Platform": "INDUSTRY_PLATFORM",
-            "Artificial Intelligence": "INDUSTRY_AI",
-            "Others": "INDUSTRY_OTHERS",
-        }
-        
         result = {}
         
-        # 先为所有模块设置默认值（隐藏）
-        for slot_prefix in module_to_slot.values():
+        # 隐藏旧的模块（Publisher, Technology, Platform, AI, Others）
+        old_slots = ["INDUSTRY_PUBLISHER", "INDUSTRY_TECHNOLOGY", "INDUSTRY_PLATFORM", "INDUSTRY_AI", "INDUSTRY_OTHERS"]
+        for slot_prefix in old_slots:
             result[f"{slot_prefix}_ITEMS_HTML"] = ""
             result[f"{slot_prefix}_HIDDEN_CLASS"] = "hidden"
             result[f"{slot_prefix}_EMPTY_HTML"] = ""
         
-        # 再处理有内容的模块
-        for module_name, module_items in items.items():
-            slot_prefix = module_to_slot.get(module_name)
-            if not slot_prefix:
-                continue
-            
-            if module_items:
-                # 有条目时：渲染卡片并显示
-                cards = []
-                for item in module_items:
-                    card_html = f"""<div class="industry-item">
+        # 渲染 AdExchanger
+        adex_items = items.get("AdExchanger", [])
+        if adex_items:
+            cards = []
+            for item in adex_items:
+                card_html = f"""<div class="industry-item">
   <p class="item-title">{self._escape_html(item.title)}</p>
   <p class="item-summary">{self._escape_html(item.summary)}</p>
   <p class="item-meta">{item.date} · <a href="{item.url}" target="_blank" rel="noopener">原文链接</a></p>
 </div>"""
-                    cards.append(card_html)
-                
-                result[f"{slot_prefix}_ITEMS_HTML"] = "\n".join(cards)
-                result[f"{slot_prefix}_HIDDEN_CLASS"] = ""  # 显示模块
-                result[f"{slot_prefix}_EMPTY_HTML"] = ""
+                cards.append(card_html)
+            result["ADEXCHANGER_ITEMS_HTML"] = "\n".join(cards)
+            result["ADEXCHANGER_HIDDEN_CLASS"] = ""
+        else:
+            result["ADEXCHANGER_ITEMS_HTML"] = ""
+            result["ADEXCHANGER_HIDDEN_CLASS"] = "hidden"
+        
+        # 渲染 Search Engine Land
+        sel_items = items.get("Search Engine Land", [])
+        if sel_items:
+            cards = []
+            for item in sel_items:
+                card_html = f"""<div class="industry-item">
+  <p class="item-title">{self._escape_html(item.title)}</p>
+  <p class="item-summary">{self._escape_html(item.summary)}</p>
+  <p class="item-meta">{item.date} · <a href="{item.url}" target="_blank" rel="noopener">原文链接</a></p>
+</div>"""
+                cards.append(card_html)
+            result["SEL_ITEMS_HTML"] = "\n".join(cards)
+            result["SEL_HIDDEN_CLASS"] = ""
+        else:
+            result["SEL_ITEMS_HTML"] = ""
+            result["SEL_HIDDEN_CLASS"] = "hidden"
         
         return result
     
