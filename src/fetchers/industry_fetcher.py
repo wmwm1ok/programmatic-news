@@ -206,26 +206,78 @@ class IndustryFetcher(BaseFetcher):
             return None
     
     def _fetch_searchengineland_latest(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Search Engine Land 最新 3 条"""
-        url = 'https://searchengineland.com/latest-posts'
+        """抓取 Search Engine Land 最新 3 条 - 使用 RSS feed"""
+        import xml.etree.ElementTree as ET
         
-        # 先尝试普通请求
-        html = self.fetch(url)
+        # 尝试使用 RSS feed
+        rss_url = 'https://searchengineland.com/feed/'
         
-        # 如果失败，使用 Playwright
-        if not html:
-            print(f"    普通请求失败，尝试 Playwright...")
-            html = self._fetch_with_playwright(url)
-        
-        if not html:
+        try:
+            response = self.session.get(rss_url, timeout=30)
+            response.raise_for_status()
+            
+            # 解析 RSS
+            root = ET.fromstring(response.content)
+            
+            # 找到所有 item 元素
+            items = []
+            channel = root.find('.//channel')
+            if channel is None:
+                return []
+            
+            rss_items = channel.findall('.//item')[:3]  # 取前3条
+            print(f"    RSS中找到 {len(rss_items)} 篇文章")
+            
+            for rss_item in rss_items:
+                try:
+                    title = rss_item.find('title')
+                    title = title.text if title is not None else ""
+                    
+                    link = rss_item.find('link')
+                    detail_url = link.text if link is not None else ""
+                    
+                    pub_date = rss_item.find('pubDate')
+                    date_str = ""
+                    if pub_date is not None and pub_date.text:
+                        # 解析 RSS 日期格式: Mon, 10 Feb 2025 14:30:00 +0000
+                        from email.utils import parsedate_to_datetime
+                        try:
+                            dt = parsedate_to_datetime(pub_date.text)
+                            date_str = dt.strftime('%Y-%m-%d')
+                        except:
+                            date_str = self.parse_date(pub_date.text) or ""
+                    
+                    description = rss_item.find('description')
+                    content = description.text if description is not None else ""
+                    # 清理 HTML 标签
+                    content = re.sub(r'<[^>]+>', '', content)
+                    content = self.clean_text(content)
+                    
+                    if title and detail_url and date_str:
+                        # 检查日期窗口
+                        if not self.is_in_date_window(date_str, window_start, window_end):
+                            print(f"    - 日期 {date_str} 不在窗口内: {title[:40]}...")
+                            continue
+                        
+                        print(f"    处理: {title[:50]}... ({date_str})")
+                        items.append(ContentItem(
+                            title=title,
+                            summary=content[:500],
+                            date=date_str,
+                            url=detail_url,
+                            source='Search Engine Land'
+                        ))
+                        print(f"      ✓ 已添加")
+                        
+                except Exception as e:
+                    print(f"    ✗ 解析RSS项失败: {e}")
+                    continue
+            
+            return items
+            
+        except Exception as e:
+            print(f"    RSS获取失败: {e}")
             return []
-        
-        soup = BeautifulSoup(html, 'html.parser')
-        items = []
-        
-        # 找文章列表
-        articles = soup.find_all('article', class_='stream-article', limit=3)
-        print(f"    找到 {len(articles)} 篇文章")
         
         for article in articles:
             try:
