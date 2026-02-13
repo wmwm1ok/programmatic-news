@@ -187,15 +187,22 @@ class IndustryFetcher(BaseFetcher):
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
                 context = browser.new_context(
-                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 800}
                 )
                 page = context.new_page()
-                page.goto(url, wait_until='networkidle', timeout=30000)
+                
+                # 增加超时到 60 秒，使用 domcontentloaded 而不是 networkidle
+                page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                
+                # 额外等待 3 秒让内容加载
+                page.wait_for_timeout(3000)
+                
                 html = page.content()
                 browser.close()
                 return html
         except Exception as e:
-            print(f"    Playwright 抓取失败: {e}")
+            print(f"    Playwright 抓取失败: {str(e)[:100]}")
             return None
     
     def _fetch_searchengineland_latest(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
