@@ -233,7 +233,7 @@ class StealthFetcher:
                     continue
                 
                 # 使用 Google News 搜索标题找摘要
-                summary = self._fetch_google_news_for_summary(title, "Criteo")
+                summary = self._fetch_google_search_summary(title, "Criteo")
                 if not summary:
                     summary = f"Criteo: {title}"
                 
@@ -253,30 +253,38 @@ class StealthFetcher:
         print(f"    Criteo: {len(items)} 条")
         return items
     
-    def _fetch_google_news_for_summary(self, title: str, company: str) -> str:
-        """使用 Google News RSS 搜索标题获取摘要"""
+    def _fetch_google_search_summary(self, title: str, company: str) -> str:
+        """使用 Google 搜索标题获取摘要 - 通过搜索结果页面"""
         try:
             # 提取标题前几个关键词搜索
             keywords = ' '.join(title.split()[:5])
             query = f"{company} {keywords}"
-            rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
             
-            response = self.session.get(rss_url, timeout=30)
+            # 使用 Google 搜索页面
+            search_url = f"https://www.google.com/search?q={query}&num=3"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            
+            response = self.session.get(search_url, headers=headers, timeout=30)
             response.raise_for_status()
             
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(response.content)
-            channel = root.find('.//channel')
-            if channel is None:
-                return ""
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 取第一条新闻的描述
-            first_item = channel.find('.//item')
-            if first_item is not None:
-                desc_elem = first_item.find('description')
-                if desc_elem is not None and desc_elem.text:
-                    # 清理 HTML 标签
-                    text = re.sub(r'<[^>]+>', '', desc_elem.text)
+            # 查找搜索结果的摘要文本
+            # 尝试多种可能的选择器
+            for selector in ['.VwiC3b', '.s3v94d', '.yXK7lf', '[data-sokoban-container]']:
+                desc_elem = soup.select_one(selector)
+                if desc_elem:
+                    text = desc_elem.get_text(strip=True)
+                    if len(text) > 50:
+                        return text[:500]
+            
+            # 备选：找任何包含关键词的段落
+            paragraphs = soup.find_all('p')
+            for p in paragraphs:
+                text = p.get_text(strip=True)
+                if company.lower() in text.lower() and len(text) > 50:
                     return text[:500]
             
             return ""
@@ -284,73 +292,75 @@ class StealthFetcher:
             return ""
     
     def fetch_teads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Teads - 使用官网 Press Releases"""
+        """抓取 Teads - 从 blog 页面获取标题，Google 搜索找摘要"""
         print("  [Stealth] 抓取 Teads...")
-        print("    访问官网 Press Releases")
         
         items = []
-        url = "https://www.teads.com/press-releases/"
+        url = "https://www.teads.com/blog/"
         
-        html = self.fetch_page(url, wait_for=".card", timeout=60000)
-        if not html:
-            return items
-        
-        soup = BeautifulSoup(html, 'html.parser')
-        cards = soup.find_all('div', class_='card')
-        print(f"    找到 {len(cards)} 个卡片")
-        
-        for card in cards[:5]:
-            try:
-                link = card.find('a', href=True)
-                if not link:
-                    continue
-                
-                title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                # 过滤非主体新闻
-                if self._is_not_main_subject(title, 'Teads'):
-                    print(f"    - 跳过(非主体): {title[:50]}...")
-                    continue
-                
-                detail_url = urljoin(url, link['href'])
-                
-                # 从卡片中提取日期
-                date_str = ""
-                date_elem = card.find(class_=re.compile('date|time'))
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or ""
-                
-                # 如果卡片没日期，尝试从URL提取
-                if not date_str:
-                    date_str = self._extract_date_from_url(detail_url)
-                
-                # 打印调试信息
-                if date_str:
-                    print(f"      日期: {date_str}")
-                else:
-                    print(f"      无法提取日期，使用当前日期")
+        try:
+            html = self.fetch_page(url, timeout=60000)
+            if not html:
+                return items
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找 blog 文章链接 (格式: /blog/title-slug/1234/)
+            news_links = soup.find_all('a', href=re.compile(r'/blog/[^/]+/\d+'))
+            print(f"    找到 {len(news_links)} 个 blog 链接")
+            
+            processed_urls = set()
+            
+            for link in news_links[:15]:
+                try:
+                    href = link.get('href', '')
+                    if not href:
+                        continue
+                    
+                    detail_url = urljoin(url, href)
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    # 从 URL slug 提取标题
+                    match = re.search(r'/blog/([^/]+)/\d+', href)
+                    if not match:
+                        continue
+                    
+                    slug = match.group(1)
+                    title = slug.replace('-', ' ').title()
+                    
+                    # 过滤太短或太长的标题
+                    if len(title) < 10 or len(title) > 200:
+                        continue
+                    
+                    # Teads blog 没有日期，使用当前日期
                     date_str = datetime.now().strftime('%Y-%m-%d')
-                
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    print(f"      - 日期不在窗口: {date_str}")
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
+                    
+                    # 过滤非主体新闻
+                    if self._is_not_main_subject(title, 'Teads'):
+                        continue
+                    
+                    # 用 Google 搜索标题找摘要
+                    print(f"    ✓ {title[:50]}...")
+                    summary = self._fetch_google_search_summary(title, "Teads")
+                    if not summary:
+                        summary = f"Teads: {title}"
+                    
                     items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
+                        title=title, summary=summary[:600], date=date_str,
                         url=detail_url, source="Teads"
                     ))
-                    print(f"    ✓ {title[:40]}... ({date_str})")
-                
-                # 限制最多3条
-                if len(items) >= 3:
-                    break
                     
-            except Exception as e:
-                continue
+                    # 限制最多3条
+                    if len(items) >= 3:
+                        break
+                        
+                except Exception as e:
+                    continue
+            
+        except Exception as e:
+            print(f"    ✗ Teads 错误: {e}")
         
         print(f"    Teads: {len(items)} 条")
         return items
@@ -484,88 +494,23 @@ class StealthFetcher:
         return is_ad and not is_excluded
 
     def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Unity - 使用官网 News"""
-        items = []
-        url = "https://unity.com/news"
+        """抓取 Unity - 官网有反爬，使用 Google News RSS"""
         print("  [Stealth] 抓取 Unity...")
+        print("    注意: 原网站有访问限制，使用 Google News RSS")
         
-        html = self.fetch_page(url, timeout=60000)
-        if not html:
-            return items
+        items = self._fetch_google_news_rss(
+            "Unity Technologies advertising monetization", 
+            window_start, 
+            window_end, 
+            "Unity"
+        )
         
-        soup = BeautifulSoup(html, 'html.parser')
+        # 限制最多3条
+        items = items[:3]
         
-        # 查找新闻文章 - 多种选择器
-        articles = soup.find_all('article')
-        if not articles:
-            articles = soup.find_all('div', class_=re.compile('news|card|post|item'))
-        if not articles:
-            # 备选：找所有链接，筛选可能是新闻的
-            all_links = soup.find_all('a', href=re.compile('/news/|/blog/|/press/'))
-            articles = []
-            for link in all_links:
-                parent = link.find_parent(['article', 'div', 'li'])
-                if parent:
-                    articles.append(parent)
-                else:
-                    # 如果找不到父元素，创建一个包装
-                    articles.append(link)
-        
-        print(f"    找到 {len(articles)} 篇文章")
-        
-        for article in articles[:8]:
-            try:
-                link = article.find('a', href=True)
-                if not link:
-                    continue
-                
-                title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                # 过滤非主体新闻
-                if self._is_not_main_subject(title, 'Unity'):
-                    print(f"    - 跳过(非主体): {title[:50]}...")
-                    continue
-                
-                # 检查是否与广告/变现相关
-                title_lower = title.lower()
-                if not any(kw in title_lower for kw in ['ad', 'ads', 'monetiz', 'advertising', 'revenue', 'grow', 'ironsource', 'levelplay']):
-                    continue
-                
-                detail_url = urljoin(url, link['href'])
-                
-                # 尝试提取日期
-                date_str = self._extract_date_from_element(article)
-                if not date_str:
-                    # 从URL尝试
-                    date_str = self._extract_date_from_url(detail_url)
-                
-                # 打印调试信息
-                if date_str:
-                    print(f"      日期: {date_str}")
-                else:
-                    print(f"      无法提取日期，尝试用当前日期")
-                    date_str = datetime.now().strftime('%Y-%m-%d')
-                
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    print(f"      - 日期不在窗口")
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="Unity"
-                    ))
-                    print(f"    ✓ {title[:50]}... ({date_str})")
-                
-                # 限制最多3条
-                if len(items) >= 3:
-                    break
-                    
-            except Exception as e:
-                continue
+        print(f"    找到 {len(items)} 条在时间窗口内")
+        for item in items[:5]:
+            print(f"    ✓ {item.title[:50]}... ({item.date})")
         
         print(f"    Unity: {len(items)} 条")
         return items
@@ -1064,152 +1009,23 @@ class StealthFetcher:
         return items
     
     def fetch_viant(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Viant Technology
-        日期在 PressRelease-post--date 类中，格式 "January 5, 2026"
-        需要进入详情页获取内容
-        """
-        items = []
-        url = COMPETITOR_SOURCES["Viant Technology"]["url"]
+        """抓取 Viant - 官网受限，使用 Google News RSS 作为备选"""
         print("  [Stealth] 抓取 Viant Technology...")
+        print("    注意: 原网站有访问限制，使用 Google News RSS")
         
-        if not self._init_browser():
-            return items
+        items = self._fetch_google_news_rss(
+            "Viant Technology news press release", 
+            window_start, 
+            window_end, 
+            "Viant Technology"
+        )
         
-        page = self.context.new_page()
-        processed_urls = set()
+        # 限制最多3条
+        items = items[:3]
         
-        try:
-            print("    访问 Viant press releases 页面...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
-            print("    ✓ 页面加载完成")
-            
-            html = page.content()
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # 查找日期元素 - PressRelease-post--date 类
-            date_divs = soup.find_all('div', class_='PressRelease-post--date')
-            print(f"    找到 {len(date_divs)} 个日期元素")
-            
-            for i, date_div in enumerate(date_divs[:15]):
-                try:
-                    date_text = date_div.get_text(strip=True)
-                    
-                    # 解析日期 "January 5, 2026" -> "2026-01-05"
-                    match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
-                    if not match:
-                        continue
-                    
-                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
-                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
-                    month_num = months.get(match.group(1).lower(), '01')
-                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
-                    
-                    # 查找对应的新闻标题和链接 - 从父元素中查找
-                    parent = date_div.find_parent()
-                    if not parent:
-                        continue
-                    
-                    # 向上查找包含链接的元素
-                    link_elem = None
-                    for _ in range(3):
-                        if not parent:
-                            break
-                        link_elem = parent.find('a', href=True)
-                        if link_elem:
-                            break
-                        parent = parent.parent
-                    
-                    if not link_elem:
-                        continue
-                    
-                    href = link_elem.get('href', '')
-                    if not href:
-                        continue
-                    
-                    detail_url = urljoin(url, href)
-                    
-                    if detail_url in processed_urls:
-                        continue
-                    processed_urls.add(detail_url)
-                    
-                    title = self.clean_text(link_elem.get_text())
-                    if not title or len(title) < 10:
-                        continue
-                    
-                    print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
-                    
-                    # 测试阶段：暂时不限制日期，只看能否抓到
-                    # if not self.is_in_date_window(date_str, window_start, window_end):
-                    #     print(f" - 不在时间窗口")
-                    #     continue
-                    
-                    print(f" ✅ (日期限制已禁用，测试中)")
-                    
-                    # 进入详情页获取内容
-                    detail_page = self.context.new_page()
-                    try:
-                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
-                        detail_page.wait_for_timeout(3000)
-                        
-                        detail_html = detail_page.content()
-                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
-                        
-                        # 提取内容
-                        content = ""
-                        for selector in ['.PressRelease-post', '.content', 'article', '.main-content', '.press-release', 'main']:
-                            elem = detail_soup.select_one(selector)
-                            if elem:
-                                text = elem.get_text(separator=' ', strip=True)
-                                if len(text) > 200:
-                                    content = self.clean_text(text)
-                                    break
-                        
-                        if not content:
-                            # 备选：移除脚本样式后获取 body
-                            for script in detail_soup(["script", "style", "nav", "header", "footer"]):
-                                script.decompose()
-                            body = detail_soup.find('body')
-                            if body:
-                                content = self.clean_text(body.get_text(separator=' ', strip=True))
-                        
-                        if content:
-                            items.append(ContentItem(
-                                title=title,
-                                summary=content[:600],
-                                date=date_str,
-                                url=detail_url,
-                                source="Viant Technology"
-                            ))
-                            print(f"        ✓ 已添加")
-                        else:
-                            print(f"        ✗ 无内容")
-                        
-                        detail_page.close()
-                        
-                        # 限制最多3条
-                        if len(items) >= 3:
-                            break
-                        
-                    except Exception as e:
-                        print(f"        ✗ 详情页错误")
-                        try:
-                            detail_page.close()
-                        except:
-                            pass
-                        continue
-                        
-                except Exception as e:
-                    continue
-                
-                # 限制最多3条
-                if len(items) >= 3:
-                    break
-                    
-        except Exception as e:
-            print(f"    ✗ Viant Technology 错误: {e}")
-        finally:
-            page.close()
+        print(f"    找到 {len(items)} 条在时间窗口内")
+        for item in items[:5]:
+            print(f"    ✓ {item.title[:50]}... ({item.date})")
         
         print(f"    Viant Technology: {len(items)} 条")
         return items
@@ -1408,9 +1224,7 @@ class StealthFetcher:
         return items
 
     def fetch_pubmatic(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 PubMatic - 使用 Google News RSS
-        原网站 https://investors.pubmatic.com/ 有访问限制，使用 Google News 作为备选
-        """
+        """抓取 PubMatic - 官网受限，使用 Google News RSS 作为备选"""
         print("  [Stealth] 抓取 PubMatic...")
         print("    注意: 原网站有访问限制，使用 Google News RSS")
         
@@ -1421,6 +1235,9 @@ class StealthFetcher:
             "PubMatic"
         )
         
+        # 限制最多3条
+        items = items[:3]
+        
         print(f"    找到 {len(items)} 条在时间窗口内")
         for item in items[:5]:
             print(f"    ✓ {item.title[:50]}... ({item.date})")
@@ -1429,22 +1246,72 @@ class StealthFetcher:
         return items
     
     def fetch_magnite(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Magnite - 使用 Google News RSS
-        原网站 https://investor.magnite.com/ 有访问限制，使用 Google News 作为备选
-        """
+        """抓取 Magnite - 使用官网标题 + Google 搜索找全文"""
         print("  [Stealth] 抓取 Magnite...")
-        print("    注意: 原网站有访问限制，使用 Google News RSS")
         
-        items = self._fetch_google_news_rss(
-            "Magnite advertising news", 
-            window_start, 
-            window_end, 
-            "Magnite"
-        )
+        items = []
+        url = "https://investor.magnite.com/press-releases"
         
-        print(f"    找到 {len(items)} 条在时间窗口内")
-        for item in items[:5]:
-            print(f"    ✓ {item.title[:50]}... ({item.date})")
+        html = self.fetch_page(url, timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # 查找新闻链接
+        news_links = soup.find_all('a', href=re.compile(r'/press-releases/'))
+        print(f"    找到 {len(news_links)} 个新闻链接")
+        
+        processed_urls = set()
+        
+        for link in news_links[:10]:
+            try:
+                href = link.get('href', '')
+                if not href:
+                    continue
+                
+                detail_url = urljoin(url, href)
+                if detail_url in processed_urls:
+                    continue
+                processed_urls.add(detail_url)
+                
+                # 获取标题
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    slug_match = re.search(r'/([^/]+)/?$', href)
+                    if slug_match:
+                        slug = slug_match.group(1)
+                        title = slug.replace('-', ' ').title()
+                
+                # 从URL提取日期
+                date_str = self._extract_date_from_url(detail_url)
+                if not date_str:
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                # 过滤非主体新闻
+                if self._is_not_main_subject(title, 'Magnite'):
+                    continue
+                
+                # 用 Google 搜索标题找摘要
+                print(f"    ✓ {title[:50]}... ({date_str})")
+                summary = self._fetch_google_search_summary(title, "Magnite")
+                if not summary:
+                    summary = f"Magnite: {title}"
+                
+                items.append(ContentItem(
+                    title=title, summary=summary[:600], date=date_str,
+                    url=detail_url, source="Magnite"
+                ))
+                
+                # 限制最多3条
+                if len(items) >= 3:
+                    break
+                    
+            except Exception as e:
+                continue
         
         print(f"    Magnite: {len(items)} 条")
         return items
@@ -1581,9 +1448,8 @@ class StealthFetcher:
         return items
     
     def fetch_ttd(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 TTD (The Trade Desk) - 使用官网 Press Room"""
+        """抓取 TTD - 使用官网标题 + Google 搜索找全文"""
         print("  [Stealth] 抓取 TTD...")
-        print("    访问官网 Press Room")
         
         items = []
         url = "https://www.thetradedesk.com/press-room"
@@ -1594,41 +1460,56 @@ class StealthFetcher:
         
         soup = BeautifulSoup(html, 'html.parser')
         
-        # 查找新闻文章
-        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('press|news|post'))
-        print(f"    找到 {len(articles)} 篇文章")
+        # 查找新闻链接
+        news_links = soup.find_all('a', href=re.compile(r'/press-room/'))
+        print(f"    找到 {len(news_links)} 个新闻链接")
         
-        for article in articles[:5]:  # 先检查前5个
+        processed_urls = set()
+        
+        for link in news_links[:10]:
             try:
-                # 查找标题和链接
-                link = article.find('a', href=True)
-                if not link:
+                href = link.get('href', '')
+                if not href:
                     continue
                 
+                detail_url = urljoin(url, href)
+                if detail_url in processed_urls:
+                    continue
+                processed_urls.add(detail_url)
+                
+                # 获取标题
                 title = self.clean_text(link.get_text())
                 if not title or len(title) < 10:
+                    slug_match = re.search(r'/([^/]+)/?$', href)
+                    if slug_match:
+                        slug = slug_match.group(1)
+                        title = slug.replace('-', ' ').title()
+                
+                # 从URL提取日期 (TTD格式: /YYYY/DD/MM/)
+                date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', href)
+                if date_match:
+                    year, day, month = date_match.group(1), date_match.group(2), date_match.group(3)
+                    date_str = f"{year}-{month}-{day}"
+                else:
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
                     continue
                 
                 # 过滤非主体新闻
                 if self._is_not_main_subject(title, 'TTD'):
-                    print(f"    - 跳过(非主体): {title[:50]}...")
                     continue
                 
-                detail_url = urljoin(url, link['href'])
+                # 用 Google 搜索标题找摘要
+                print(f"    ✓ {title[:50]}... ({date_str})")
+                summary = self._fetch_google_search_summary(title, "The Trade Desk")
+                if not summary:
+                    summary = f"The Trade Desk: {title}"
                 
-                # 尝试从URL或页面提取日期
-                date_str = self._extract_date_from_url(detail_url) or self._extract_date_from_element(article)
-                
-                if not date_str or not self.is_in_date_window(date_str, window_start, window_end):
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="TTD"
-                    ))
-                    print(f"    ✓ {title[:50]}... ({date_str})")
+                items.append(ContentItem(
+                    title=title, summary=summary[:600], date=date_str,
+                    url=detail_url, source="TTD"
+                ))
                 
                 # 限制最多3条
                 if len(items) >= 3:

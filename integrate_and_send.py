@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -130,10 +131,18 @@ def generate_chinese_title_summary(title, summary):
             line = line.strip()
             if line.startswith('中文标题：') or line.startswith('中文标题:'):
                 chinese_title = line.split('：', 1)[1].strip() if '：' in line else line.split(':', 1)[1].strip()
-                # 移除可能的方括号
-                chinese_title = chinese_title.strip('[]')
+                # 保留分类标签格式如 [AI], [CTV], [Programmatic], [联网电视] 等
+                # 分类标签特点：中括号内2-20个字符，后面跟着空格和正文
+                category_match = re.match(r'^(\[[^\]]{2,20}\])\s*(.+)', chinese_title)
+                if category_match:
+                    # 是分类标签格式，保留标签 + 内容
+                    chinese_title = category_match.group(1) + ' ' + category_match.group(2).strip()
+                else:
+                    # 不是分类标签，移除可能的纯方括号包裹
+                    chinese_title = chinese_title.strip('[]')
             elif line.startswith('中文摘要：') or line.startswith('中文摘要:'):
                 chinese_summary = line.split('：', 1)[1].strip() if '：' in line else line.split(':', 1)[1].strip()
+                # 摘要一般没有分类标签，直接移除可能的方括号包裹
                 chinese_summary = chinese_summary.strip('[]')
         
         return chinese_title, chinese_summary
