@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Viant Technology 测试脚本 - 14天窗口"""
+"""Zeta Global 测试脚本 - 14天窗口"""
 import sys
 sys.path.insert(0, 'src')
 import re
@@ -11,12 +11,12 @@ from fetchers.base import ContentItem
 from summarizer import Summarizer
 from renderer import HTMLRenderer
 
-url = "https://www.viantinc.com/company/news/press-releases/"
+url = "https://investors.zetaglobal.com/news/default.aspx"
 window_end = datetime(2026, 2, 12)
 window_start = window_end - timedelta(days=14)
 
 print("="*70)
-print("Viant Technology 抓取 - 14天窗口")
+print("Zeta Global 抓取 - 14天窗口")
 print(f"{window_start.date()} ~ {window_end.date()}")
 print("="*70)
 
@@ -32,7 +32,7 @@ with sync_playwright() as p:
     html = page.content()
     soup = BeautifulSoup(html, 'html.parser')
     
-    date_elems = soup.find_all('span', class_='PressRelease-post--date')
+    date_elems = soup.find_all('div', class_=re.compile('evergreen-item-date-time|evergreen-news-date'))
     print(f"\n找到 {len(date_elems)} 个日期元素\n")
     
     for i, date_elem in enumerate(date_elems):
@@ -46,11 +46,11 @@ with sync_playwright() as p:
                  'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
         date_str = f"{match.group(3)}-{months.get(match.group(1).lower(), '01')}-{match.group(2).zfill(2)}"
         
-        parent = date_elem.find_parent(['div', 'article', 'li', 'section'])
+        parent = date_elem.find_parent()
         if not parent:
             continue
         
-        link_elem = parent.find('a', href=re.compile('/press-releases/'))
+        link_elem = parent.find('a', href=re.compile('/news/'))
         if not link_elem:
             continue
         
@@ -68,7 +68,6 @@ with sync_playwright() as p:
         
         print(" ✅")
         
-        # 获取详情
         detail_page = browser.new_page()
         try:
             detail_page.goto(detail_url, wait_until="load", timeout=30000)
@@ -87,10 +86,8 @@ with sync_playwright() as p:
                         break
             
             if content:
-                items.append(ContentItem(title=title, summary=content[:600], date=date_str, url=detail_url, source="Viant"))
+                items.append(ContentItem(title=title, summary=content[:600], date=date_str, url=detail_url, source="Zeta Global"))
                 print(f"    ✓ 已添加")
-            else:
-                print(f"    ✗ 无法提取内容")
             
             detail_page.close()
         except Exception as e:
@@ -113,6 +110,6 @@ if items:
         item.summary = summarizer.summarize(item.title, item.summary)
     
     renderer = HTMLRenderer()
-    html = renderer.render({"Viant": items}, {}, window_start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d"))
+    html = renderer.render({"Zeta Global": items}, {}, window_start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d"))
     output_path = renderer.save(html, window_start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d"))
     print(f"✅ 报告: {output_path}")
