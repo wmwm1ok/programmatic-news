@@ -846,9 +846,9 @@ class StealthFetcher:
                                 month_num = months.get(match.group(1).lower(), '01')
                                 date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
                         
+                        # 如果无法提取日期，使用当前日期
                         if not date_str:
-                            detail_page.close()
-                            continue
+                            date_str = datetime.now().strftime('%Y-%m-%d')
                         
                         print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
                         
