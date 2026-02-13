@@ -121,6 +121,8 @@ class HybridCompetitorFetcher:
                         items = stealth.fetch_magnite(window_start, window_end)
                     elif key == "Taboola":
                         items = stealth.fetch_taboola(window_start, window_end)
+                    elif key == "mobvista":
+                        items = stealth.fetch_mobvista(window_start, window_end)
                     else:
                         items = stealth.fetch_generic(key, window_start, window_end)
                     
