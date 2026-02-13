@@ -396,25 +396,35 @@ class StealthFetcher:
         return items
     
     def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Unity - 使用 curl 访问已知的新闻链接
-        Unity 网站有 Playwright 访问限制，使用 curl 绕过
+        """抓取 Unity
+        
+        策略:
+        1. Unity 主站 (unity.com/news) 是客户端渲染，curl 无法获取文章列表
+        2. 使用 curl 直接访问已知的文章链接
+        3. 链接列表需要定期更新（建议每周检查一次）
+        
+        TODO: 考虑使用 Puppeteer/Selenium 等更强大的浏览器自动化工具
+              或者寻找 Unity RSS/API 端点
         """
         items = []
-        print("  [Stealth] 抓取 Unity (使用 curl)...")
-        
-        # 用户提供的已知新闻链接
-        news_urls = [
-            "https://unity.com/news/unitys-fourth-quarter-and-fiscal-year-2025-financial-results-are-available",
-            "https://unity.com/news/unity-appoints-bernard-kim-to-its-board-of-directors-and-announces-board-transitions"
-        ]
+        print("  [Stealth] 抓取 Unity...")
+        print("    注意: Unity 网站需要定期更新链接列表")
         
         import subprocess
+        
+        # 已知的新闻链接列表 - 需要定期更新
+        # 建议每周访问 https://unity.com/news 获取最新链接
+        news_urls = [
+            "https://unity.com/news/unitys-fourth-quarter-and-fiscal-year-2025-financial-results-are-available",
+            "https://unity.com/news/unity-appoints-bernard-kim-to-its-board-of-directors-and-announces-board-transitions",
+            # 添加更多链接...
+        ]
         
         for i, detail_url in enumerate(news_urls):
             try:
                 print(f"    [{i+1}] 访问: {detail_url[:70]}...")
                 
-                # 使用 curl 获取页面
+                # 使用 curl 获取页面（绕过 Playwright 限制）
                 result = subprocess.run([
                     'curl', '-s', detail_url,
                     '-H', 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -504,6 +514,12 @@ class StealthFetcher:
                 continue
         
         print(f"    Unity: {len(items)} 条")
+        
+        # 提示更新链接
+        if len(items) == 0:
+            print("    ⚠️ 未抓取到任何新闻，可能需要更新链接列表")
+            print("       请访问 https://unity.com/news 获取最新链接")
+        
         return items
     
     def fetch_zeta(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
