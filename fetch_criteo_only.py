@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-抓取 Criteo - 用于 criteo-only 分支
+抓取 Criteo - 使用 Playwright（今天上午成功的方案）
 """
 import json
 import sys
@@ -8,19 +8,19 @@ import os
 sys.path.insert(0, 'src')
 
 from datetime import datetime, timedelta
-from fetchers.stealth_fetcher import StealthFetcher
+from fetchers.playwright_fetcher import PlaywrightFetcher
 
 window_end = datetime.now()
 window_start = window_end - timedelta(days=7)
 
 print("="*70)
-print("抓取 Criteo")
+print("抓取 Criteo (使用 Playwright)")
 print(f"时间窗口: {window_start.date()} ~ {window_end.date()}")
 print("="*70)
 
-stealth = StealthFetcher()
-items = stealth.fetch_criteo(window_start, window_end)
-stealth.close()
+fetcher = PlaywrightFetcher()
+items = fetcher.fetch_criteo(window_start, window_end)
+fetcher.close()
 
 # 保存结果
 result = {
