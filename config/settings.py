@@ -167,7 +167,7 @@ OUTPUT_CONFIG = {
 }
 
 
-def get_date_window(run_date: datetime = None, days: int = 10):
+def get_date_window(run_date: datetime = None, days: int = 7):
     """
     获取时间窗口
     :param run_date: 运行日期，默认为今天
