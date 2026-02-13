@@ -182,19 +182,26 @@ class StealthFetcher:
         for link in news_links[:10]:
             try:
                 href = link.get('href', '')
+                print(f"    处理链接: {href[:60]}...")
+                
                 if not href:
+                    print(f"      - 空href")
                     continue
                 
                 detail_url = urljoin(url, href)
                 if detail_url in processed_urls:
+                    print(f"      - 重复URL")
                     continue
                 processed_urls.add(detail_url)
                 
                 # 获取标题
                 title = self.clean_text(link.get_text())
+                print(f"      原标题: {title[:50]}...")
+                
                 # 如果标题是 "Read More" 或类似，需要从详情页获取真实标题
                 is_read_more = 'read more' in title.lower() or len(title) < 20
                 if not title:
+                    print(f"      - 空标题")
                     continue
                 
                 # 从URL提取日期 /2026/02/09/ -> 2026-02-09
@@ -204,11 +211,14 @@ class StealthFetcher:
                 else:
                     date_str = datetime.now().strftime('%Y-%m-%d')
                 
+                print(f"      日期: {date_str}")
+                
                 if not self.is_in_date_window(date_str, window_start, window_end):
-                    print(f"    - 日期不在窗口: {date_str}")
+                    print(f"      - 日期不在窗口")
                     continue
                 
                 # 获取详情页内容
+                print(f"      获取详情...")
                 content = self._fetch_detail(detail_url)
                 
                 # 如果标题是 "Read More"，从详情页获取真实标题
@@ -221,16 +231,17 @@ class StealthFetcher:
                 
                 # 过滤非主体新闻
                 if self._is_not_main_subject(title, 'Criteo'):
-                    print(f"    - 跳过(非主体): {title[:50]}...")
+                    print(f"      - 跳过(非主体): {title[:50]}...")
                     continue
                 
                 if content:
-                    print(f"    ✓ {title[:50]}... ({date_str})")
+                    print(f"      ✓ 成功: {title[:50]}...")
                     items.append(ContentItem(
                         title=title, summary=content[:600], date=date_str,
                         url=detail_url, source="Criteo"
                     ))
                 else:
+                    print(f"      - 无内容")
                     print(f"    - 无内容: {title[:50]}...")
                 
                 # 限制最多3条
