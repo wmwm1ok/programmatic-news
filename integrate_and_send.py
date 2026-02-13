@@ -82,11 +82,11 @@ def load_industry_results():
         return {}
 
 
-def generate_chinese_summary(title, summary):
-    """使用 DeepSeek 生成中文摘要"""
+def generate_chinese_title_summary(title, summary):
+    """使用 DeepSeek 生成中文标题和摘要"""
     api_key = os.getenv('DEEPSEEK_API_KEY')
     if not api_key:
-        return summary[:200] if summary else "无摘要"
+        return title, summary[:200] if summary else "无摘要"
     
     try:
         from openai import OpenAI
@@ -96,27 +96,46 @@ def generate_chinese_summary(title, summary):
             base_url="https://api.deepseek.com"
         )
         
-        prompt = f"""请将以下英文新闻标题和内容翻译成中文，并生成一段简短的中文摘要（80-100字）：
+        prompt = f"""请将以下英文新闻标题和内容翻译成中文。
 
-标题：{title}
+原标题：{title}
 
 内容：{summary[:500]}
 
-请只返回中文摘要，不要其他内容。"""
+请按以下格式返回：
+中文标题：[翻译后的标题]
+中文摘要：[80-100字的中文摘要]
+
+请确保中文标题简洁明了，不超过30个字。"""
         
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
+            max_tokens=300,
             temperature=0.7
         )
         
-        chinese_summary = response.choices[0].message.content.strip()
-        return chinese_summary
+        result = response.choices[0].message.content.strip()
+        
+        # 解析结果
+        chinese_title = title
+        chinese_summary = summary[:200] if summary else "无摘要"
+        
+        for line in result.split('\n'):
+            line = line.strip()
+            if line.startswith('中文标题：') or line.startswith('中文标题:'):
+                chinese_title = line.split('：', 1)[1].strip() if '：' in line else line.split(':', 1)[1].strip()
+                # 移除可能的方括号
+                chinese_title = chinese_title.strip('[]')
+            elif line.startswith('中文摘要：') or line.startswith('中文摘要:'):
+                chinese_summary = line.split('：', 1)[1].strip() if '：' in line else line.split(':', 1)[1].strip()
+                chinese_summary = chinese_summary.strip('[]')
+        
+        return chinese_title, chinese_summary
         
     except Exception as e:
-        print(f"      ⚠️ 中文摘要生成失败: {e}")
-        return summary[:200] if summary else "无摘要"
+        print(f"      ⚠️ 中文翻译失败: {e}")
+        return title, summary[:200] if summary else "无摘要"
 
 
 def main():
@@ -164,20 +183,20 @@ def main():
     industry_results = load_industry_results()
     total_ind = sum(len(v) for v in industry_results.values())
     
-    # 3. 生成中文摘要
+    # 3. 生成中文标题和摘要
     if use_ai_summary:
-        print("\n[3/4] 生成中文摘要...")
+        print("\n[3/4] 生成中文标题和摘要...")
         
-        # 竞品摘要
+        # 竞品资讯
         for i, item in enumerate(competitor_items, 1):
             print(f"  [{i}/{len(competitor_items)}] {item.title[:40]}...")
-            item.summary = generate_chinese_summary(item.title, item.summary)
+            item.title, item.summary = generate_chinese_title_summary(item.title, item.summary)
         
-        # 行业摘要
+        # 行业资讯
         for module, items in industry_results.items():
             for item in items:
                 print(f"  [行业-{module}] {item.title[:40]}...")
-                item.summary = generate_chinese_summary(item.title, item.summary)
+                item.title, item.summary = generate_chinese_title_summary(item.title, item.summary)
     else:
         # 截断原文作为摘要
         for item in competitor_items:
