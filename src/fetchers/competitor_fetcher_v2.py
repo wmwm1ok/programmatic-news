@@ -279,8 +279,15 @@ class CompetitorFetcherV2(BaseFetcher):
             return items
             
         soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.select('.press-item, .news-item')
-        self.log(f"Teads 找到 {len(articles)} 篇文章")
+        
+        # 尝试多种选择器
+        selectors = ['.card', 'article', '.press-item', '.news-item', '.post']
+        articles = []
+        for selector in selectors:
+            articles = soup.select(selector)
+            if articles:
+                self.log(f"Teads 使用选择器: {selector}, 找到 {len(articles)} 篇")
+                break
         
         for article in articles[:15]:
             try:
@@ -291,13 +298,25 @@ class CompetitorFetcherV2(BaseFetcher):
                 detail_url = urljoin(base_url, link_elem['href'])
                 title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
                 title = self.clean_text(title_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
                 
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
+                # 日期提取 - 优先从 URL
+                date_str = self._extract_date_from_url(detail_url)
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                # 备选：从元素
+                if not date_str:
+                    date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                    if date_elem:
+                        date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
+                
+                # 备选：使用今天
+                if not date_str:
+                    from datetime import datetime
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                    self.log(f"  Teads: 未找到日期，使用今天: {title[:40]}...")
+                
+                if self.is_in_date_window(date_str, window_start, window_end):
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -307,6 +326,7 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="Teads"
                         ))
+                        self.log(f"  -> 已添加: {title[:40]}... ({date_str})")
                         
             except Exception as e:
                 continue
@@ -322,9 +342,14 @@ class CompetitorFetcherV2(BaseFetcher):
             
         soup = BeautifulSoup(html, 'html.parser')
         
-        # AppLovin newsroom
-        articles = soup.find_all('article') or soup.select('.news-item, .post, .card')
-        self.log(f"AppLovin 找到 {len(articles)} 篇文章")
+        # 尝试多种选择器
+        selectors = ['.news-item', 'article', '.post', '.card', '[class*="news"]', '[class*="press"]']
+        articles = []
+        for selector in selectors:
+            articles = soup.select(selector)
+            if articles:
+                self.log(f"AppLovin 使用选择器: {selector}, 找到 {len(articles)} 篇")
+                break
         
         for article in articles[:15]:
             try:
@@ -335,13 +360,21 @@ class CompetitorFetcherV2(BaseFetcher):
                 detail_url = urljoin(base_url, link_elem['href'])
                 title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
                 title = self.clean_text(title_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
                 
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
+                # 日期提取
+                date_str = self._extract_date_from_url(detail_url)
+                if not date_str:
+                    date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                    if date_elem:
+                        date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                if not date_str:
+                    from datetime import datetime
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if self.is_in_date_window(date_str, window_start, window_end):
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -351,6 +384,7 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="AppLovin"
                         ))
+                        self.log(f"  -> 已添加: {title[:40]}... ({date_str})")
                         
             except Exception as e:
                 continue
@@ -366,9 +400,14 @@ class CompetitorFetcherV2(BaseFetcher):
             
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Unity news
-        articles = soup.find_all('article') or soup.select('.news-item, .post, .blog-post')
-        self.log(f"Unity 找到 {len(articles)} 篇文章")
+        # Unity - 尝试多种选择器
+        selectors = ['[data-testid="article-card"]', 'article', '.news-item', '.post', '.card']
+        articles = []
+        for selector in selectors:
+            articles = soup.select(selector)
+            if articles:
+                self.log(f"Unity 使用选择器: {selector}, 找到 {len(articles)} 篇")
+                break
         
         for article in articles[:15]:
             try:
@@ -379,13 +418,22 @@ class CompetitorFetcherV2(BaseFetcher):
                 detail_url = urljoin(base_url, link_elem['href'])
                 title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
                 title = self.clean_text(title_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
                 
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
+                # Unity 日期通常在 URL 中: /news/2026/02/10/...
+                date_str = self._extract_date_from_url(detail_url)
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                if not date_str:
+                    date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                    if date_elem:
+                        date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
+                
+                if not date_str:
+                    from datetime import datetime
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if self.is_in_date_window(date_str, window_start, window_end):
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -395,6 +443,7 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="Unity"
                         ))
+                        self.log(f"  -> 已添加: {title[:40]}... ({date_str})")
                         
             except Exception as e:
                 continue
@@ -410,9 +459,14 @@ class CompetitorFetcherV2(BaseFetcher):
             
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Zeta IR 网站
-        rows = soup.find_all('tr') or soup.select('.item, .news-item')
-        self.log(f"Zeta 找到 {len(rows)} 行")
+        # Zeta IR 网站 - 尝试多种选择器
+        selectors = ['table tr', '.item', '.news-item', '.release-item']
+        rows = []
+        for selector in selectors:
+            rows = soup.select(selector)
+            if rows:
+                self.log(f"Zeta 使用选择器: {selector}, 找到 {len(rows)} 行")
+                break
         
         for row in rows[:15]:
             try:
@@ -422,13 +476,20 @@ class CompetitorFetcherV2(BaseFetcher):
                     
                 detail_url = urljoin(base_url, link_elem['href'])
                 title = self.clean_text(link_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
                 
-                date_elem = row.find('td', class_=re.compile('date')) or row.find('time')
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text())
+                # 日期提取
+                date_str = self._extract_date_from_url(detail_url)
+                if not date_str:
+                    date_elem = row.find('td', class_=re.compile('date')) or row.find('time')
+                    if date_elem:
+                        date_str = self.parse_date(date_elem.get_text())
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                if not date_str:
+                    continue
+                
+                if self.is_in_date_window(date_str, window_start, window_end):
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -438,6 +499,7 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="Zeta Global"
                         ))
+                        self.log(f"  -> 已添加: {title[:40]}... ({date_str})")
                         
             except Exception as e:
                 continue
@@ -493,7 +555,15 @@ class CompetitorFetcherV2(BaseFetcher):
             return items
             
         soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.select('.press-item, .news-item')
+        
+        # 尝试多种选择器
+        selectors = ['article', '.press-item', '.news-item', '.post', '.card', '[class*="press"]', '[class*="news"]']
+        articles = []
+        for selector in selectors:
+            articles = soup.select(selector)
+            if articles:
+                self.log(f"Moloco 使用选择器: {selector}, 找到 {len(articles)} 篇")
+                break
         
         for article in articles[:10]:
             try:
@@ -504,13 +574,21 @@ class CompetitorFetcherV2(BaseFetcher):
                 detail_url = urljoin(base_url, link_elem['href'])
                 title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
                 title = self.clean_text(title_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
                 
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
+                # 日期提取
+                date_str = self._extract_date_from_url(detail_url)
+                if not date_str:
+                    date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                    if date_elem:
+                        date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                if not date_str:
+                    from datetime import datetime
+                    date_str = datetime.now().strftime('%Y-%m-%d')
+                
+                if self.is_in_date_window(date_str, window_start, window_end):
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -520,6 +598,7 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="Moloco"
                         ))
+                        self.log(f"  -> 已添加: {title[:40]}... ({date_str})")
                         
             except Exception as e:
                 continue
@@ -657,7 +736,15 @@ class CompetitorFetcherV2(BaseFetcher):
             return items
             
         soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.select('.press-item, .news-item')
+        
+        # 尝试多种选择器
+        selectors = ['article', '.press-item', '.news-item', '.post', 'table tr']
+        articles = []
+        for selector in selectors:
+            articles = soup.select(selector)
+            if articles:
+                self.log(f"Magnite 使用选择器: {selector}, 找到 {len(articles)} 个")
+                break
         
         for article in articles[:10]:
             try:
@@ -668,13 +755,20 @@ class CompetitorFetcherV2(BaseFetcher):
                 detail_url = urljoin(base_url, link_elem['href'])
                 title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
                 title = self.clean_text(title_elem.get_text())
+                if not title or len(title) < 10:
+                    continue
                 
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
+                # 日期提取
+                date_str = self._extract_date_from_url(detail_url)
+                if not date_str:
+                    date_elem = article.find('time') or article.find(class_=re.compile('date'))
+                    if date_elem:
+                        date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                if not date_str:
+                    continue
+                
+                if self.is_in_date_window(date_str, window_start, window_end):
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -684,6 +778,7 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="Magnite"
                         ))
+                        self.log(f"  -> 已添加: {title[:40]}... ({date_str})")
                         
             except Exception as e:
                 continue

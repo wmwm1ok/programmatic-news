@@ -260,16 +260,15 @@ class PlaywrightFetcher:
         
         page = self.context.new_page()
         try:
-            # 访问页面并等待加载 - 增加超时时间，使用 domcontentloaded 而不是 networkidle
             print(f"    访问 {url}...")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)  # 等待 JavaScript 渲染
+            page.wait_for_timeout(8000)  # 等待日历控件加载
             
             # 查找所有可点击的日期按钮
             date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
             print(f"    找到 {len(date_buttons)} 个可点击日期")
             
-            for button in date_buttons[:10]:  # 只处理前10个日期
+            for i, button in enumerate(date_buttons[:15]):  # 处理前15个日期
                 try:
                     # 获取日期文本
                     date_text = button.inner_text().strip()
@@ -277,8 +276,6 @@ class PlaywrightFetcher:
                         continue
                     
                     day = int(date_text)
-                    # 构造日期（假设是当前年月）
-                    from datetime import datetime
                     now = datetime.now()
                     date_str = f"{now.year}-{now.month:02d}-{day:02d}"
                     
@@ -286,22 +283,27 @@ class PlaywrightFetcher:
                     if not self.is_in_date_window(date_str, window_start, window_end):
                         continue
                     
-                    print(f"    点击日期: {date_str}")
+                    print(f"    [{i+1}] 处理日期: {date_str}")
                     
-                    # 点击日期
-                    button.click()
-                    page.wait_for_timeout(2000)
+                    # 先滚动到按钮可见
+                    button.scroll_into_view_if_needed()
+                    page.wait_for_timeout(500)
+                    
+                    # 使用 JavaScript 点击，更稳定
+                    button.evaluate('el => el.click()')
+                    page.wait_for_timeout(3000)  # 等待新闻加载
                     
                     # 获取显示的新闻
                     html = page.content()
                     soup = BeautifulSoup(html, 'html.parser')
                     
-                    # 查找新闻链接
-                    news_links = soup.find_all('a', href=re.compile(r'/news|/press|/release'))
+                    # 查找新闻链接 - 更宽松的选择器
+                    news_links = soup.find_all('a', href=re.compile(r'202[0-9]'))
+                    print(f"      找到 {len(news_links)} 个链接")
                     
-                    for link in news_links[:3]:  # 每天最多3条
+                    for link in news_links[:3]:
                         title = self.clean_text(link.get_text())
-                        if not title or len(title) < 10:
+                        if not title or len(title) < 10 or 'photo' in title.lower():
                             continue
                         
                         href = link.get('href', '')
