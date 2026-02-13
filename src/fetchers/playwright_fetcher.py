@@ -31,19 +31,12 @@ class PlaywrightFetcher:
             try:
                 from playwright.sync_api import sync_playwright
                 self.pw = sync_playwright().start()
-                self.browser = self.pw.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-                )
+                self.browser = self.pw.chromium.launch(headless=True)
                 self.context = self.browser.new_context(
-                    user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    viewport={'width': 1920, 'height': 1080}
+                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 )
             except ImportError:
                 print("  [!] Playwright 未安装，使用 requests 模式")
-                return False
-            except Exception as e:
-                print(f"  [!] Playwright 启动失败: {e}")
                 return False
         return True
     
@@ -137,6 +130,157 @@ class PlaywrightFetcher:
         text = re.sub(r'\s+', ' ', text)
         text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
         return text.strip()
+    
+    def _fetch_detail(self, url: str) -> str:
+        """获取详情页内容"""
+        html = self.fetch_page(url, timeout=20000)
+        if not html:
+            return ""
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        for script in soup(["script", "style", "nav", "header", "footer"]):
+            script.decompose()
+        
+        content_selectors = [
+            'article',
+            '.content',
+            '.main-content',
+            '.post-content',
+            'main',
+        ]
+        
+        for selector in content_selectors:
+            elem = soup.select_one(selector)
+            if elem:
+                return self.clean_text(elem.get_text(separator=' ', strip=True))
+        
+        return ""
+    
+    def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Criteo - 使用日历控件（增强版）"""
+        items = []
+        url = COMPETITOR_SOURCES["Criteo"]["url"]
+        
+        print("  [Playwright] 抓取 Criteo...")
+        
+        if not self._init_browser():
+            return items
+        
+        page = self.context.new_page()
+        # 用于去重
+        processed_urls = set()
+        
+        try:
+            # 增加超时到 120 秒
+            print(f"    访问 {url}...")
+            page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            page.wait_for_timeout(8000)  # 等待日历控件加载
+            
+            # 检查是否有 Cloudflare 挑战
+            content = page.content()
+            if 'cloudflare' in content.lower() or 'checking your browser' in content.lower():
+                print("    ⚠️ 检测到 Cloudflare，等待挑战完成...")
+                page.wait_for_timeout(10000)
+            
+            # 查找所有可点击的日期按钮
+            date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
+            print(f"    找到 {len(date_buttons)} 个可点击日期")
+            
+            for i, button in enumerate(date_buttons[:20]):  # 处理前20个日期
+                try:
+                    # 获取日期文本
+                    date_text = button.inner_text().strip()
+                    if not date_text.isdigit():
+                        continue
+                    
+                    day = int(date_text)
+                    now = datetime.now()
+                    date_str = f"{now.year}-{now.month:02d}-{day:02d}"
+                    
+                    # 检查日期是否在窗口内
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        continue
+                    
+                    print(f"    [{i+1}] 处理日期: {date_str}")
+                    
+                    # 使用 evaluate 点击（带有 scrollIntoView）
+                    button.evaluate('el => { el.scrollIntoView({block: "center"}); setTimeout(() => el.click(), 100); }')
+                    page.wait_for_timeout(4000)  # 等待新闻加载
+                    
+                    # 获取显示的新闻
+                    html = page.content()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # 查找新闻链接 - 更宽松的选择器
+                    news_links = soup.find_all('a', href=re.compile(r'202[0-9]'))
+                    print(f"      找到 {len(news_links)} 个潜在新闻")
+                    
+                    for link in news_links[:10]:  # 每天最多10条
+                        title = self.clean_text(link.get_text())
+                        if not title or len(title) < 10 or 'photo' in title.lower():
+                            continue
+                        
+                        href = link.get('href', '')
+                        if not href.startswith('http'):
+                            detail_url = urljoin(url, href)
+                        else:
+                            detail_url = href
+                        
+                        # 去重检查
+                        if href in processed_urls:
+                            continue
+                        processed_urls.add(href)
+                        
+                        print(f"      处理新闻: {title[:50]}...")
+                        
+                        # 获取详情内容 - 尝试更多选择器
+                        detail_page = self.context.new_page()
+                        try:
+                            detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                            detail_page.wait_for_timeout(3000)
+                            
+                            detail_html = detail_page.content()
+                            detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                            
+                            content = ""
+                            for selector in ['article', '.content', '.main-content', 'main', '.wd_body', '.wd_content', '.press-release', '.news-content', 'body']:
+                                content_elem = detail_soup.select_one(selector)
+                                if content_elem:
+                                    text = content_elem.get_text(separator=' ', strip=True)
+                                    if len(text) > 200:
+                                        content = text
+                                        break
+                            
+                            if content:
+                                content = re.sub(r'\s+', ' ', content)
+                                items.append(ContentItem(
+                                    title=title,
+                                    summary=content[:600],
+                                    date=date_str,
+                                    url=detail_url,
+                                    source="Criteo"
+                                ))
+                                print(f"        ✓ 已添加")
+                            else:
+                                print(f"        ✗ 无法提取内容")
+                                
+                        except Exception as e:
+                            print(f"        ✗ 获取详情失败: {e}")
+                        finally:
+                            detail_page.close()
+                            
+                except Exception as e:
+                    print(f"    处理日期出错: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Playwright 错误: {e}")
+        finally:
+            page.close()
+        
+        print(f"    Criteo: {len(items)} 条（去重后）")
+        return items
     
     def fetch_applovin(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 AppLovin"""
@@ -248,94 +392,49 @@ class PlaywrightFetcher:
         
         return items
     
-    def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Criteo - 使用日历控件"""
+    def fetch_criteo_legacy(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Criteo"""
         items = []
         url = COMPETITOR_SOURCES["Criteo"]["url"]
         
         print("  [Playwright] 抓取 Criteo...")
-        
-        if not self._init_browser():
+        html = self.fetch_page(url, wait_for="table, .item, .release")
+        if not html:
             return items
         
-        page = self.context.new_page()
-        try:
-            print(f"    访问 {url}...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(8000)  # 等待日历控件加载
-            
-            # 查找所有可点击的日期按钮
-            date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
-            print(f"    找到 {len(date_buttons)} 个可点击日期")
-            
-            for i, button in enumerate(date_buttons[:15]):  # 处理前15个日期
-                try:
-                    # 获取日期文本
-                    date_text = button.inner_text().strip()
-                    if not date_text.isdigit():
-                        continue
-                    
-                    day = int(date_text)
-                    now = datetime.now()
-                    date_str = f"{now.year}-{now.month:02d}-{day:02d}"
-                    
-                    # 检查日期是否在窗口内
-                    if not self.is_in_date_window(date_str, window_start, window_end):
-                        continue
-                    
-                    print(f"    [{i+1}] 处理日期: {date_str}")
-                    
-                    # 先滚动到按钮可见
-                    button.scroll_into_view_if_needed()
-                    page.wait_for_timeout(500)
-                    
-                    # 使用 JavaScript 点击，更稳定
-                    button.evaluate('el => el.click()')
-                    page.wait_for_timeout(3000)  # 等待新闻加载
-                    
-                    # 获取显示的新闻
-                    html = page.content()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # 查找新闻链接 - 更宽松的选择器
-                    news_links = soup.find_all('a', href=re.compile(r'202[0-9]'))
-                    print(f"      找到 {len(news_links)} 个链接")
-                    
-                    for link in news_links[:3]:
-                        title = self.clean_text(link.get_text())
-                        if not title or len(title) < 10 or 'photo' in title.lower():
-                            continue
-                        
-                        href = link.get('href', '')
-                        if not href.startswith('http'):
-                            detail_url = urljoin(url, href)
-                        else:
-                            detail_url = href
-                        
-                        print(f"      找到新闻: {title[:50]}...")
-                        
-                        # 获取详情内容
-                        content = self._fetch_detail(detail_url)
-                        if content:
-                            items.append(ContentItem(
-                                title=title,
-                                summary=content[:600],
-                                date=date_str,
-                                url=detail_url,
-                                source="Criteo"
-                            ))
-                            print(f"        ✓ 已添加")
-                            
-                except Exception as e:
-                    print(f"    处理日期出错: {e}")
-                    continue
-                    
-        except Exception as e:
-            print(f"    ✗ Playwright 错误: {e}")
-        finally:
-            page.close()
+        soup = BeautifulSoup(html, 'html.parser')
+        rows = soup.find_all('tr') or soup.select('.item, .release-item')
         
-        print(f"    Criteo 总计: {len(items)} 条")
+        print(f"    找到 {len(rows)} 行")
+        
+        for row in rows[:15]:
+            try:
+                link_elem = row.find('a', href=True)
+                if not link_elem:
+                    continue
+                
+                detail_url = urljoin(url, link_elem['href'])
+                title = self.clean_text(link_elem.get_text())
+                
+                date_elem = row.find('td', class_=re.compile('date')) or row.find('time')
+                date_str = ""
+                if date_elem:
+                    date_str = self.parse_date(date_elem.get_text())
+                
+                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                    content = self._fetch_detail(detail_url)
+                    if content:
+                        items.append(ContentItem(
+                            title=title,
+                            summary=content[:600],
+                            date=date_str,
+                            url=detail_url,
+                            source="Criteo"
+                        ))
+                        
+            except Exception as e:
+                continue
+        
         return items
     
     def fetch_taboola(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
@@ -474,29 +573,3 @@ class PlaywrightFetcher:
                 continue
         
         return items
-    
-    def _fetch_detail(self, url: str) -> str:
-        """获取详情页内容"""
-        html = self.fetch_page(url, timeout=20000)
-        if not html:
-            return ""
-        
-        soup = BeautifulSoup(html, 'html.parser')
-        
-        for script in soup(["script", "style", "nav", "header", "footer"]):
-            script.decompose()
-        
-        content_selectors = [
-            'article',
-            '.content',
-            '.main-content',
-            '.post-content',
-            'main',
-        ]
-        
-        for selector in content_selectors:
-            elem = soup.select_one(selector)
-            if elem:
-                return self.clean_text(elem.get_text(separator=' ', strip=True))
-        
-        return ""
