@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # 阶段1：并行抓取所有13家公司
+  # 阶段1：并行抓取所有13家公司 + 行业资讯
   fetch-applovin:
     uses: ./.github/workflows/fetch-single.yml
     with:
@@ -88,11 +88,16 @@ jobs:
       company: Zeta Global
     secrets: inherit
   
-  # 阶段2：main 抓取行业资讯 + 整合所有结果
+  fetch-industry:
+    uses: ./.github/workflows/fetch-industry.yml
+    secrets: inherit
+  
+  # 阶段2：main 只负责整合所有结果
   generate-report:
     needs: [fetch-applovin, fetch-bigo, fetch-criteo, fetch-magnite, 
             fetch-mobvista, fetch-moloco, fetch-pubmatic, fetch-taboola,
-            fetch-teads, fetch-ttd, fetch-unity, fetch-viant, fetch-zeta]
+            fetch-teads, fetch-ttd, fetch-unity, fetch-viant, fetch-zeta,
+            fetch-industry]
     runs-on: ubuntu-latest
     
     steps:
@@ -108,8 +113,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install playwright
-          playwright install chromium
       
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -123,7 +126,7 @@ jobs:
           echo "=== Downloaded artifacts ==="
           ls -la artifacts/
       
-      - name: Generate and send report
+      - name: Integrate and send report
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           SMTP_SERVER: ${{ secrets.SMTP_SERVER || 'smtp.gmail.com' }}
@@ -133,7 +136,7 @@ jobs:
           EMAIL_FROM: ${{ secrets.EMAIL_FROM || secrets.EMAIL_USERNAME }}
           EMAIL_TO: ${{ secrets.EMAIL_TO || 'wangmeng42@baidu.com' }}
         run: |
-          python run_weekly_report_parallel.py
+          python integrate_and_send.py
       
       - name: Upload final report
         if: always()
