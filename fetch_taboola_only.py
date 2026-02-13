@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from fetchers.playwright_fetcher import PlaywrightFetcher
 
 window_end = datetime.now()
-window_start = window_end - timedelta(days=7)
+window_start = window_end - timedelta(days=14)
 
 print("="*70)
 print("抓取 Taboola (使用 Playwright)")
