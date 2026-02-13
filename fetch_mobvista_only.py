@@ -24,7 +24,7 @@ stealth.close()
 
 # 保存结果
 result = {
-    'company': 'mobvista',
+    'company': 'Mobvista',
     'items': [{'title': i.title, 'summary': i.summary, 'date': i.date, 'url': i.url, 'source': i.source} for i in items],
     'count': len(items)
 }

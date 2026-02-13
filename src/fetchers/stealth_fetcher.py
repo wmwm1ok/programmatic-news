@@ -232,14 +232,16 @@ class StealthFetcher:
                     print(f"      - 跳过(非主体): {title[:50]}...")
                     continue
                 
-                # 使用标题作为摘要
-                summary = f"Criteo news: {title}"
+                # 使用 Google News 搜索标题找摘要
+                summary = self._fetch_google_news_for_summary(title, "Criteo")
+                if not summary:
+                    summary = f"Criteo: {title}"
+                
                 print(f"      ✓ 成功: {title[:50]}...")
                 items.append(ContentItem(
                     title=title, summary=summary[:600], date=date_str,
                     url=detail_url, source="Criteo"
                 ))
-                    print(f"    - 无内容: {title[:50]}...")
                 
                 # 限制最多3条
                 if len(items) >= 3:
@@ -250,6 +252,36 @@ class StealthFetcher:
         
         print(f"    Criteo: {len(items)} 条")
         return items
+    
+    def _fetch_google_news_for_summary(self, title: str, company: str) -> str:
+        """使用 Google News RSS 搜索标题获取摘要"""
+        try:
+            # 提取标题前几个关键词搜索
+            keywords = ' '.join(title.split()[:5])
+            query = f"{company} {keywords}"
+            rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+            
+            response = self.session.get(rss_url, timeout=30)
+            response.raise_for_status()
+            
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(response.content)
+            channel = root.find('.//channel')
+            if channel is None:
+                return ""
+            
+            # 取第一条新闻的描述
+            first_item = channel.find('.//item')
+            if first_item is not None:
+                desc_elem = first_item.find('description')
+                if desc_elem is not None and desc_elem.text:
+                    # 清理 HTML 标签
+                    text = re.sub(r'<[^>]+>', '', desc_elem.text)
+                    return text[:500]
+            
+            return ""
+        except Exception as e:
+            return ""
     
     def fetch_teads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 Teads - 使用官网 Press Releases"""
