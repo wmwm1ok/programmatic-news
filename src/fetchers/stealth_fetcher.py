@@ -162,7 +162,7 @@ class StealthFetcher:
         return ""
     
     def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Criteo"""
+        """抓取 Criteo - 增强版，处理 Cloudflare"""
         items = []
         url = COMPETITOR_SOURCES["Criteo"]["url"]
         print("  [Stealth] 抓取 Criteo...")
@@ -172,16 +172,35 @@ class StealthFetcher:
         
         page = self.context.new_page()
         try:
-            page.goto("https://www.criteo.com", wait_until="domcontentloaded", timeout=30000)
-            self._random_delay(2000, 4000)
+            # 增加超时到 120 秒
+            print("    访问主页建立会话...")
+            page.goto("https://www.criteo.com", wait_until="domcontentloaded", timeout=120000)
+            self._random_delay(3000, 5000)
             
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            self._random_delay(5000, 8000)
+            print("    访问投资者页面...")
+            page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            self._random_delay(8000, 10000)  # 等待日历加载
+            
+            # 检查是否有 Cloudflare 挑战
+            content = page.content()
+            if 'cloudflare' in content.lower() or 'checking your browser' in content.lower():
+                print("    ⚠️ 检测到 Cloudflare，等待挑战完成...")
+                page.wait_for_timeout(15000)  # 额外等待
             
             date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
             print(f"    找到 {len(date_buttons)} 个日期")
             
-            for button in date_buttons[:15]:
+            if len(date_buttons) == 0:
+                print("    ⚠️ 未找到日期按钮，可能页面结构已改变")
+                # 截图调试
+                try:
+                    page.screenshot(path='/tmp/criteo_screenshot.png')
+                    print("    已截图保存到 /tmp/criteo_screenshot.png")
+                except:
+                    pass
+                return items
+            
+            for i, button in enumerate(date_buttons[:20]):  # 增加到20个日期
                 try:
                     date_text = button.inner_text().strip()
                     if not date_text.isdigit():
@@ -194,19 +213,22 @@ class StealthFetcher:
                     if not self.is_in_date_window(date_str, window_start, window_end):
                         continue
                     
-                    print(f"    点击日期: {date_str}")
-                    button.click()
-                    self._random_delay(3000, 5000)
+                    print(f"    [{i+1}] 处理日期: {date_str}")
+                    
+                    # 使用 JavaScript 点击
+                    button.evaluate('el => { el.scrollIntoView({block: "center"}); el.click(); }')
+                    self._random_delay(4000, 6000)
                     
                     html = page.content()
                     soup = BeautifulSoup(html, 'html.parser')
                     
-                    news_links = soup.find_all('a', href=re.compile(r'202[0-9]'))
-                    print(f"      找到 {len(news_links)} 个链接")
+                    # 更宽松的新闻链接查找
+                    news_links = soup.find_all('a', href=re.compile(r'/news/|/press/|/release/'))
+                    print(f"      找到 {len(news_links)} 个新闻链接")
                     
-                    for link in news_links[:2]:
+                    for link in news_links[:3]:
                         title = self.clean_text(link.get_text())
-                        if not title or len(title) < 10:
+                        if not title or len(title) < 10 or 'photo' in title.lower():
                             continue
                         
                         href = link.get('href', '')
