@@ -102,6 +102,11 @@ def generate_chinese_title_summary(title, summary):
 
 内容：{summary[:500]}
 
+翻译要求：
+1. 人名、公司名、品牌名、股票代码、产品名等专有名词保留英文，不要翻译
+2. 例如：The Trade Desk/TTD、Criteo、Unity、AppLovin、Google、AI、CEO 等保留原样
+3. 只翻译普通词汇和语句
+
 请按以下格式返回：
 中文标题：[翻译后的标题]
 中文摘要：[80-100字的中文摘要]

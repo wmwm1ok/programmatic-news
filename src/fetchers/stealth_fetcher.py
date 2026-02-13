@@ -162,39 +162,160 @@ class StealthFetcher:
         return ""
     
     def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Criteo - 使用 Google News RSS"""
+        """抓取 Criteo - 使用官网 Investor Room"""
+        items = []
+        url = "https://criteo.investorroom.com/releases"
         print("  [Stealth] 抓取 Criteo...")
-        print("    使用 Google News RSS")
         
-        items = self._fetch_google_news_rss(
-            "Criteo",
-            window_start,
-            window_end,
-            "Criteo"
-        )
+        if not self._init_browser():
+            return items
+        
+        page = self.context.new_page()
+        try:
+            print("    访问投资者页面...")
+            page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            self._random_delay(5000, 8000)
+            
+            # 查找日期按钮
+            date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
+            print(f"    找到 {len(date_buttons)} 个日期")
+            
+            if len(date_buttons) == 0:
+                print("    ⚠️ 未找到日期按钮")
+                return items
+            
+            processed_titles = set()
+            
+            for i, button in enumerate(date_buttons[:15]):
+                try:
+                    date_text = button.inner_text().strip()
+                    if not date_text.isdigit():
+                        continue
+                    
+                    day = int(date_text)
+                    now = datetime.now()
+                    date_str = f"{now.year}-{now.month:02d}-{day:02d}"
+                    
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        continue
+                    
+                    print(f"    [{i+1}] 处理日期: {date_str}")
+                    
+                    # 点击日期
+                    button.evaluate('el => { el.scrollIntoView({block: "center"}); el.click(); }')
+                    self._random_delay(3000, 5000)
+                    
+                    html = page.content()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # 查找新闻链接
+                    news_links = soup.find_all('a', href=re.compile(r'/news/|/press/|/release/'))
+                    
+                    for link in news_links[:3]:
+                        title = self.clean_text(link.get_text())
+                        if not title or len(title) < 10 or 'photo' in title.lower():
+                            continue
+                        
+                        # 去重
+                        if title in processed_titles:
+                            continue
+                        processed_titles.add(title)
+                        
+                        # 过滤非主体新闻
+                        if self._is_not_main_subject(title, 'Criteo'):
+                            print(f"      - 跳过(非主体): {title[:40]}...")
+                            continue
+                        
+                        href = link.get('href', '')
+                        detail_url = urljoin(url, href)
+                        
+                        content = self._fetch_detail(detail_url)
+                        if content:
+                            items.append(ContentItem(
+                                title=title, summary=content[:600], date=date_str,
+                                url=detail_url, source="Criteo"
+                            ))
+                            print(f"      ✓ {title[:40]}...")
+                        
+                        # 限制最多3条
+                        if len(items) >= 3:
+                            break
+                    
+                    if len(items) >= 3:
+                        break
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Criteo 错误: {e}")
+        finally:
+            page.close()
         
         print(f"    Criteo: {len(items)} 条")
-        for item in items[:3]:
-            print(f"    ✓ {item.title[:60]}... ({item.date})")
-        
         return items
     
     def fetch_teads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Teads - 使用 Google News RSS"""
+        """抓取 Teads - 使用官网 Press Releases"""
         print("  [Stealth] 抓取 Teads...")
-        print("    使用 Google News RSS")
+        print("    访问官网 Press Releases")
         
-        items = self._fetch_google_news_rss(
-            "Teads",
-            window_start,
-            window_end,
-            "Teads"
-        )
+        items = []
+        url = "https://www.teads.com/press-releases/"
+        
+        html = self.fetch_page(url, wait_for=".card", timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        cards = soup.find_all('div', class_='card')
+        print(f"    找到 {len(cards)} 个卡片")
+        
+        for card in cards[:5]:
+            try:
+                link = card.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                # 过滤非主体新闻
+                if self._is_not_main_subject(title, 'Teads'):
+                    print(f"    - 跳过(非主体): {title[:50]}...")
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 从URL提取日期
+                date_match = re.search(r'/(
+			)/(\d{2})/(
+			)/', detail_url)
+                if date_match:
+                    date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                else:
+                    continue
+                
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Teads"
+                    ))
+                    print(f"    ✓ {title[:40]}... ({date_str})")
+                
+                # 限制最多3条
+                if len(items) >= 3:
+                    break
+                    
+            except Exception as e:
+                continue
         
         print(f"    Teads: {len(items)} 条")
-        for item in items[:3]:
-            print(f"    ✓ {item.title[:60]}... ({item.date})")
-        
         return items
     
     def fetch_applovin(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
@@ -1277,25 +1398,113 @@ class StealthFetcher:
         return items
     
     def fetch_ttd(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 TTD (The Trade Desk) - 使用 Google News RSS
-        URL: https://www.thetradedesk.com/press-room
-        """
+        """抓取 TTD (The Trade Desk) - 使用官网 Press Room"""
         print("  [Stealth] 抓取 TTD...")
-        print("    使用 Google News RSS")
+        print("    访问官网 Press Room")
         
-        items = self._fetch_google_news_rss(
-            "The Trade Desk TTD news",
-            window_start,
-            window_end,
-            "TTD"
-        )
+        items = []
+        url = "https://www.thetradedesk.com/press-room"
         
-        print(f"    找到 {len(items)} 条在时间窗口内")
-        for item in items[:5]:
-            print(f"    ✓ {item.title[:50]}... ({item.date})")
+        html = self.fetch_page(url, timeout=60000)
+        if not html:
+            return items
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # 查找新闻文章
+        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('press|news|post'))
+        print(f"    找到 {len(articles)} 篇文章")
+        
+        for article in articles[:5]:  # 先检查前5个
+            try:
+                # 查找标题和链接
+                link = article.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                # 过滤非主体新闻
+                if self._is_not_main_subject(title, 'TTD'):
+                    print(f"    - 跳过(非主体): {title[:50]}...")
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 尝试从URL或页面提取日期
+                date_str = self._extract_date_from_url(detail_url) or self._extract_date_from_element(article)
+                
+                if not date_str or not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="TTD"
+                    ))
+                    print(f"    ✓ {title[:50]}... ({date_str})")
+                
+                # 限制最多3条
+                if len(items) >= 3:
+                    break
+                    
+            except Exception as e:
+                continue
         
         print(f"    TTD: {len(items)} 条")
         return items
+    
+    def _is_not_main_subject(self, title: str, company: str) -> bool:
+        """检查新闻是否不是关于公司本身的主体新闻"""
+        title_lower = title.lower()
+        
+        # 如果是关于基金/机构买卖股票的新闻，通常不是主体新闻
+        fund_keywords = [
+            'retirement fund', 'pension fund', 'etf', 'mutual fund', 
+            'holdings', 'acquires shares', 'buys shares', 'sells shares',
+            'stake in', 'position in', 'portfolio', 'retirement system',
+            'california', 'texas', 'florida', 'new york', 'teacher',
+            'public employees', 'state board'
+        ]
+        
+        # 如果标题以这些词开头或包含这些词+公司股票，可能是非主体新闻
+        for keyword in fund_keywords:
+            if keyword in title_lower:
+                # 检查是否包含公司股票相关
+                if any(stock in title_lower for stock in ['shares', 'stock', 'position', 'stake']):
+                    return True
+        
+        return False
+    
+    def _extract_date_from_url(self, url: str) -> str:
+        """从URL提取日期"""
+        match = re.search(r'/(
+			)/(\d{2})/(
+			)/', url)
+        if match:
+            return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+        return ""
+    
+    def _extract_date_from_element(self, elem) -> str:
+        """从元素中提取日期"""
+        # 查找时间标签
+        time_tag = elem.find('time')
+        if time_tag:
+            datetime_attr = time_tag.get('datetime', '')
+            if datetime_attr:
+                match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                if match:
+                    return match.group(0)
+        
+        # 查找日期类
+        date_elem = elem.find(class_=re.compile('date|time'))
+        if date_elem:
+            return self.parse_date(date_elem.get_text()) or ""
+        
+        return ""
     
     def fetch_generic(self, company_key: str, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """通用抓取方法"""
