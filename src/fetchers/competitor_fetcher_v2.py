@@ -72,7 +72,9 @@ class CompetitorFetcherV2(BaseFetcher):
         return results
     
     def _fetch_ttd(self, base_url: str, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 TTD - thetradedesk.com"""
+        """抓取 TTD - thetradedesk.com
+        关键：日期在 <time datetime="YYYY-MM-DD"> 标签中
+        """
         items = []
         html = self.fetch(base_url)
         if not html:
@@ -81,58 +83,53 @@ class CompetitorFetcherV2(BaseFetcher):
             
         soup = BeautifulSoup(html, 'html.parser')
         
-        # TTD 网站结构：卡片式布局
-        # 尝试多种选择器
-        selectors = [
-            'a[href*="/news/"]',
-            'a[href*="/press-room/"]',
-            '.card a', '.news-item a', '.press-item a',
-            'article a', '.post a'
-        ]
+        # TTD 使用 <time> 标签存储日期
+        # 查找所有 time 标签
+        time_tags = soup.find_all('time')
+        print(f"    找到 {len(time_tags)} 个 time 标签")
         
-        links = []
-        for selector in selectors:
-            links = soup.select(selector)
-            if links:
-                print(f"    使用选择器: {selector}, 找到 {len(links)} 个链接")
-                break
+        processed_urls = set()
         
-        if not links:
-            print("    ✗ 未找到任何链接")
-            return items
-        
-        for link in links[:15]:
+        for time_tag in time_tags:
             try:
-                href = link.get('href', '')
-                if not href or href.startswith('#') or href.startswith('javascript'):
+                # 从 datetime 属性获取日期
+                datetime_attr = time_tag.get('datetime', '')
+                if not datetime_attr:
                     continue
-                    
+                
+                # 解析日期格式 "2026-06-01" -> "2026-01-06"
+                date_match = __import__('re').match(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                if not date_match:
+                    continue
+                
+                date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                
+                # 向上查找包含链接的父元素
+                parent = time_tag.parent
+                link = None
+                for _ in range(5):  # 向上查找5层
+                    if not parent:
+                        break
+                    link = parent.find('a', href=True)
+                    if link:
+                        break
+                    parent = parent.parent
+                
+                if not link:
+                    continue
+                
+                href = link.get('href', '')
+                if not href or href in processed_urls:
+                    continue
+                processed_urls.add(href)
+                
                 detail_url = urljoin(base_url, href)
                 title = self.clean_text(link.get_text())
                 
                 if not title or len(title) < 10:
                     continue
                 
-                # 尝试从链接或父元素获取日期
-                date_str = self._extract_date_from_element(link) or self._extract_date_from_url(href)
-                
-                # 日期解析失败时，尝试从详情页获取
-                if not date_str:
-                    print(f"    尝试从详情页获取日期: {title[:40]}...")
-                    content = self._fetch_detail_content(detail_url)
-                    if content:
-                        # 尝试从内容中提取日期
-                        date_match = __import__('re').search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', content[:1000])
-                        if date_match:
-                            date_str = f"{date_match.group(1)}-{int(date_match.group(2)):02d}-{int(date_match.group(3)):02d}"
-                    if date_str:
-                        print(f"      从详情页获取到日期: {date_str}")
-                
-                # 如果还是没有日期，默认使用今天（作为备选）
-                if not date_str:
-                    from datetime import datetime
-                    date_str = datetime.now().strftime('%Y-%m-%d')
-                    print(f"    警告: 未找到日期，使用今天: {title[:40]}...")
+                print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}")
                 
                 # 检查日期是否在窗口内
                 if self.is_in_date_window(date_str, window_start, window_end):
