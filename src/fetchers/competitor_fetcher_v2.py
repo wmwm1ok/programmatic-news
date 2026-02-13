@@ -97,12 +97,17 @@ class CompetitorFetcherV2(BaseFetcher):
                 if not datetime_attr:
                     continue
                 
-                # 解析日期格式 "2026-06-01" -> "2026-01-06"
+                # TTD 使用 YYYY-DD-MM 格式（非标准）
+                # 例如："2026-06-01" 表示 2026年1月6日（不是6月1日）
                 date_match = __import__('re').match(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
                 if not date_match:
                     continue
                 
-                date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                year = date_match.group(1)
+                day = date_match.group(2)  # TTD把这个当地
+                month = date_match.group(3)  # TTD把这个当月
+                
+                date_str = f"{year}-{month}-{day}"
                 
                 # 向上查找包含链接的父元素
                 parent = time_tag.parent
