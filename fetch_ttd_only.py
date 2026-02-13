@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from fetchers.competitor_fetcher_v2 import CompetitorFetcherV2
 
 window_end = datetime.now()
-window_start = window_end - timedelta(days=7)
+window_start = window_end - timedelta(days=14)
 
 print("="*70)
 print("抓取 TTD (使用 HTTP 直接请求)")
