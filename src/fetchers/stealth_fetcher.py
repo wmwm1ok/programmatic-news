@@ -523,53 +523,135 @@ class StealthFetcher:
         return items
     
     def fetch_zeta(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Zeta Global"""
+        """抓取 Zeta Global
+        日期在 evergreen-item-date-time / evergreen-news-date 类中
+        格式: "February 10, 2026"
+        类似于 AppLovin 的结构
+        """
         items = []
         url = COMPETITOR_SOURCES["Zeta Global"]["url"]
         print("  [Stealth] 抓取 Zeta Global...")
         
-        html = self.fetch_page(url, wait_for="table", timeout=60000)
-        if not html:
+        if not self._init_browser():
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
-        rows = soup.find_all('table') or soup.find_all('tr')
-        print(f"    找到 {len(rows)} 行")
+        page = self.context.new_page()
+        processed_urls = set()
         
-        for row in rows[:15]:
-            try:
-                link = row.find('a', href=True)
-                if not link:
-                    continue
-                
-                title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                detail_url = urljoin(url, link['href'])
-                
-                # 获取日期
-                date_elem = row.find('td', class_=re.compile('date')) or row.find('time')
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text())
-                
-                if not date_str:
-                    continue
-                
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="Zeta Global"
-                    ))
-                    print(f"    ✓ {title[:40]}... ({date_str})")
+        try:
+            print("    访问 Zeta Global 投资者页面...")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            print("    ✓ 页面加载完成")
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找日期元素 - evergreen-item-date-time / evergreen-news-date 类
+            date_divs = soup.find_all('div', class_=re.compile('evergreen-item-date-time|evergreen-news-date'))
+            print(f"    找到 {len(date_divs)} 个日期元素")
+            
+            for i, date_div in enumerate(date_divs[:15]):
+                try:
+                    date_text = date_div.get_text(strip=True)
                     
-            except Exception as e:
-                continue
+                    # 解析日期 "February 10, 2026" -> "2026-02-10"
+                    match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                    if not match:
+                        continue
+                    
+                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                    month_num = months.get(match.group(1).lower(), '01')
+                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                    
+                    # 查找对应的新闻标题和链接 - 从父元素中查找
+                    parent = date_div.find_parent()
+                    if not parent:
+                        continue
+                    
+                    link_elem = parent.find('a', href=True)
+                    if not link_elem:
+                        continue
+                    
+                    href = link_elem.get('href', '')
+                    if not href or '/news/' not in href:
+                        continue
+                    
+                    detail_url = urljoin(url, href)
+                    
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    title = self.clean_text(link_elem.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                    
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        print(f" - 不在时间窗口")
+                        continue
+                    
+                    print(f" ✅ 在时间窗口内")
+                    
+                    # 进入详情页获取内容
+                    detail_page = self.context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        detail_page.wait_for_timeout(3000)
+                        
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 提取内容
+                        content = ""
+                        for selector in ['.module_body', '.news-body', '.content', 'article', '.main-content', '.press-release', 'main']:
+                            elem = detail_soup.select_one(selector)
+                            if elem:
+                                text = elem.get_text(separator=' ', strip=True)
+                                if len(text) > 200:
+                                    content = self.clean_text(text)
+                                    break
+                        
+                        if not content:
+                            # 备选：移除脚本样式后获取 body
+                            for script in detail_soup(["script", "style", "nav", "header", "footer"]):
+                                script.decompose()
+                            body = detail_soup.find('body')
+                            if body:
+                                content = self.clean_text(body.get_text(separator=' ', strip=True))
+                        
+                        if content:
+                            items.append(ContentItem(
+                                title=title,
+                                summary=content[:600],
+                                date=date_str,
+                                url=detail_url,
+                                source="Zeta Global"
+                            ))
+                            print(f"        ✓ 已添加")
+                        else:
+                            print(f"        ✗ 无内容")
+                        
+                        detail_page.close()
+                        
+                    except Exception as e:
+                        print(f"        ✗ 详情页错误")
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Zeta Global 错误: {e}")
+        finally:
+            page.close()
         
         print(f"    Zeta Global: {len(items)} 条")
         return items
