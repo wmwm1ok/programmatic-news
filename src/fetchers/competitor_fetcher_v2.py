@@ -163,6 +163,7 @@ class CompetitorFetcherV2(BaseFetcher):
         items = []
         html = self.fetch(base_url)
         if not html:
+            print("    ✗ 无法获取页面")
             return items
             
         soup = BeautifulSoup(html, 'html.parser')
@@ -177,19 +178,26 @@ class CompetitorFetcherV2(BaseFetcher):
         for selector in selectors:
             rows = soup.select(selector)
             if rows:
-                self.log(f"Criteo 使用选择器: {selector}, 找到 {len(rows)} 个")
+                print(f"    使用选择器: {selector}, 找到 {len(rows)} 个")
                 break
+        
+        # 调试：显示前5行的原始HTML
+        print(f"    调试：显示前3行内容:")
+        for i, row in enumerate(rows[:3]):
+            print(f"    [行{i+1}] {row.get_text(strip=True)[:100]}...")
         
         for row in rows[:15]:
             try:
                 link_elem = row.find('a', href=True)
                 if not link_elem:
+                    print(f"    跳过：未找到链接")
                     continue
                     
                 detail_url = urljoin(base_url, link_elem['href'])
                 title = self.clean_text(link_elem.get_text())
                 
                 if not title or len(title) < 10:
+                    print(f"    跳过：标题太短 '{title[:30]}...'")
                     continue
                 
                 # 获取日期 - Criteo 通常在表格中有日期列
@@ -200,14 +208,18 @@ class CompetitorFetcherV2(BaseFetcher):
                 date_str = ""
                 if date_elem:
                     date_str = self.parse_date(date_elem.get_text())
+                    print(f"    找到日期元素: {date_elem.get_text(strip=True)} -> {date_str}")
                 
                 # 尝试从 URL 解析日期
                 if not date_str:
                     date_str = self._extract_date_from_url(detail_url)
+                    if date_str:
+                        print(f"    从URL解析日期: {date_str}")
                 
-                self.log(f"Criteo: {title[:40]}... | 日期: {date_str}")
+                print(f"    处理: {title[:50]}... | 日期: {date_str or '未找到'}")
                 
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                # 暂时忽略日期窗口限制，先收集所有内容
+                if date_str:  # 只要有日期就处理
                     content = self._fetch_detail_content(detail_url)
                     if content:
                         items.append(ContentItem(
@@ -217,10 +229,17 @@ class CompetitorFetcherV2(BaseFetcher):
                             url=detail_url,
                             source="Criteo"
                         ))
+                        print(f"      ✓ 已添加")
+                    else:
+                        print(f"      ✗ 无法获取详情页内容")
+                else:
+                    print(f"      - 跳过：无日期")
                         
             except Exception as e:
+                print(f"    ✗ 处理出错: {e}")
                 continue
-                
+        
+        print(f"    总计: {len(items)} 条")
         return items
     
     def _fetch_taboola(self, base_url: str, window_start: datetime, window_end: datetime) -> List[ContentItem]:
