@@ -179,10 +179,37 @@ class IndustryFetcher(BaseFetcher):
         
         return ""
     
+    def _fetch_with_playwright(self, url: str) -> Optional[str]:
+        """使用 Playwright 抓取页面（用于反爬网站）"""
+        try:
+            from playwright.sync_api import sync_playwright
+            
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+                page = context.new_page()
+                page.goto(url, wait_until='networkidle', timeout=30000)
+                html = page.content()
+                browser.close()
+                return html
+        except Exception as e:
+            print(f"    Playwright 抓取失败: {e}")
+            return None
+    
     def _fetch_searchengineland_latest(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 Search Engine Land 最新 3 条"""
         url = 'https://searchengineland.com/latest-posts'
+        
+        # 先尝试普通请求
         html = self.fetch(url)
+        
+        # 如果失败，使用 Playwright
+        if not html:
+            print(f"    普通请求失败，尝试 Playwright...")
+            html = self._fetch_with_playwright(url)
+        
         if not html:
             return []
         
@@ -221,8 +248,11 @@ class IndustryFetcher(BaseFetcher):
                 
                 print(f"    处理: {title[:50]}... ({date_str})")
                 
-                # 获取详情页内容
+                # 获取详情页内容（先尝试普通请求，失败用 Playwright）
                 detail_html = self.fetch(detail_url)
+                if not detail_html:
+                    detail_html = self._fetch_with_playwright(detail_url)
+                
                 if detail_html:
                     content = self._extract_sel_content(detail_html)
                     if content:
