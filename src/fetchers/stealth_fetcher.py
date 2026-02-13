@@ -224,22 +224,39 @@ class StealthFetcher:
                     print(f"      - 日期不在窗口")
                     continue
                 
-                # 简化：不使用 _fetch_detail，直接用标题作为内容
-                # Criteo 网站有反爬，详情页获取经常失败
-                
                 # 过滤非主体新闻
                 if self._is_not_main_subject(title, 'Criteo'):
                     print(f"      - 跳过(非主体): {title[:50]}...")
                     continue
                 
-                # 使用 Google News 搜索标题找摘要
-                summary = self._fetch_google_search_summary(title, "Criteo")
-                if not summary:
+                # 尝试从详情页获取内容（更准确的日期和内容）
+                content, detail_date = self._fetch_detail_content(
+                    detail_url, 
+                    ['.press-release', '.entry-content', '.content', 'article', 'main']
+                )
+                
+                # 如果详情页获取到日期，使用详情页的日期（更准确）
+                if detail_date:
+                    date_str = detail_date
+                    print(f"      详情页日期: {date_str}")
+                
+                # 再次检查日期窗口（使用详情页的准确日期）
+                if not self.is_in_date_window(date_str, window_start, window_end):
+                    print(f"      - 日期不在窗口: {date_str}")
+                    continue
+                
+                # 使用详情页内容，如果没有则使用标题
+                if content:
+                    summary = content[:600]
+                    print(f"      ✓ 从详情页获取内容: {len(content)} 字符")
+                else:
+                    # 详情页失败，使用标题作为摘要
                     summary = f"Criteo: {title}"
+                    print(f"      ! 详情页获取失败，使用标题")
                 
                 print(f"      ✓ 成功: {title[:50]}...")
                 items.append(ContentItem(
-                    title=title, summary=summary[:600], date=date_str,
+                    title=title, summary=summary, date=date_str,
                     url=detail_url, source="Criteo"
                 ))
                 
@@ -334,21 +351,36 @@ class StealthFetcher:
                     if len(title) < 10 or len(title) > 200:
                         continue
                     
-                    # Teads blog 没有日期，使用当前日期
-                    date_str = datetime.now().strftime('%Y-%m-%d')
+                    # 尝试从详情页获取内容和日期
+                    content, detail_date = self._fetch_detail_content(
+                        detail_url,
+                        ['.blog-content', '.entry-content', 'article', '.content', 'main']
+                    )
+                    
+                    # 使用详情页日期，如果没有则使用当前日期
+                    if detail_date:
+                        date_str = detail_date
+                    else:
+                        date_str = datetime.now().strftime('%Y-%m-%d')
+                    
+                    # 检查日期窗口
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        print(f"    - 日期不在窗口: {date_str}")
+                        continue
                     
                     # 过滤非主体新闻
                     if self._is_not_main_subject(title, 'Teads'):
                         continue
                     
-                    # 用 Google 搜索标题找摘要
-                    print(f"    ✓ {title[:50]}...")
-                    summary = self._fetch_google_search_summary(title, "Teads")
-                    if not summary:
+                    # 使用详情页内容，如果没有则使用标题
+                    if content:
+                        summary = content[:600]
+                    else:
                         summary = f"Teads: {title}"
                     
+                    print(f"    ✓ {title[:50]}... ({date_str})")
                     items.append(ContentItem(
-                        title=title, summary=summary[:600], date=date_str,
+                        title=title, summary=summary, date=date_str,
                         url=detail_url, source="Teads"
                     ))
                     
@@ -1295,14 +1327,30 @@ class StealthFetcher:
                 if self._is_not_main_subject(title, 'Magnite'):
                     continue
                 
-                # 用 Google 搜索标题找摘要
-                print(f"    ✓ {title[:50]}... ({date_str})")
-                summary = self._fetch_google_search_summary(title, "Magnite")
-                if not summary:
+                # 尝试从详情页获取内容（更准确）
+                content, detail_date = self._fetch_detail_content(
+                    detail_url,
+                    ['.press-release', '.entry-content', 'article', '.content', 'main']
+                )
+                
+                # 如果详情页获取到日期，验证是否在窗口内
+                if detail_date:
+                    if not self.is_in_date_window(detail_date, window_start, window_end):
+                        print(f"    - 详情页日期不在窗口: {detail_date}")
+                        continue
+                    # 使用详情页日期（更准确）
+                    date_str = detail_date
+                
+                # 使用详情页内容，如果没有则使用标题
+                if content:
+                    summary = content[:600]
+                    print(f"    ✓ 从详情页获取: {title[:50]}... ({date_str})")
+                else:
                     summary = f"Magnite: {title}"
+                    print(f"    ✓ {title[:50]}... ({date_str})")
                 
                 items.append(ContentItem(
-                    title=title, summary=summary[:600], date=date_str,
+                    title=title, summary=summary, date=date_str,
                     url=detail_url, source="Magnite"
                 ))
                 
@@ -1500,14 +1548,30 @@ class StealthFetcher:
                 if self._is_not_main_subject(title, 'TTD'):
                     continue
                 
-                # 用 Google 搜索标题找摘要
-                print(f"    ✓ {title[:50]}... ({date_str})")
-                summary = self._fetch_google_search_summary(title, "The Trade Desk")
-                if not summary:
+                # 尝试从详情页获取内容（更准确）
+                content, detail_date = self._fetch_detail_content(
+                    detail_url,
+                    ['.press-release', '.entry-content', 'article', '.content', 'main']
+                )
+                
+                # 如果详情页获取到日期，验证是否在窗口内
+                if detail_date:
+                    if not self.is_in_date_window(detail_date, window_start, window_end):
+                        print(f"    - 详情页日期不在窗口: {detail_date}")
+                        continue
+                    # 使用详情页日期（更准确）
+                    date_str = detail_date
+                
+                # 使用详情页内容，如果没有则使用标题
+                if content:
+                    summary = content[:600]
+                    print(f"    ✓ 从详情页获取: {title[:50]}... ({date_str})")
+                else:
                     summary = f"The Trade Desk: {title}"
+                    print(f"    ✓ {title[:50]}... ({date_str})")
                 
                 items.append(ContentItem(
-                    title=title, summary=summary[:600], date=date_str,
+                    title=title, summary=summary, date=date_str,
                     url=detail_url, source="TTD"
                 ))
                 
@@ -1520,6 +1584,56 @@ class StealthFetcher:
         
         print(f"    TTD: {len(items)} 条")
         return items
+    
+    def _fetch_detail_content(self, url: str, selectors: list = None) -> tuple:
+        """
+        获取详情页内容和日期
+        :param url: 详情页URL
+        :param selectors: 内容选择器列表（按优先级）
+        :return: (content, date_str) 元组
+        """
+        if not selectors:
+            selectors = ['.entry-content', '.post-content', '.article-content', 'article', '.content', 'main']
+        
+        try:
+            html = self.fetch_page(url, timeout=30000)
+            if not html:
+                return "", ""
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 提取日期
+            date_str = ""
+            # 方法1: time标签
+            time_tag = soup.find('time')
+            if time_tag:
+                datetime_attr = time_tag.get('datetime', '')
+                if datetime_attr:
+                    match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                    if match:
+                        date_str = match.group(0)
+            
+            # 方法2: 从URL提取日期
+            if not date_str:
+                date_str = self._extract_date_from_url(url)
+            
+            # 提取内容
+            content = ""
+            for selector in selectors:
+                elem = soup.select_one(selector)
+                if elem:
+                    # 移除脚本和样式
+                    for script in elem.find_all(['script', 'style']):
+                        script.decompose()
+                    text = elem.get_text(separator=' ', strip=True)
+                    if len(text) > 100:
+                        content = self.clean_text(text)
+                        break
+            
+            return content, date_str
+            
+        except Exception as e:
+            return "", ""
     
     def _is_not_main_subject(self, title: str, company: str) -> bool:
         """检查新闻是否不是关于公司本身的主体新闻"""
