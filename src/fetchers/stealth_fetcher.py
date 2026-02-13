@@ -173,18 +173,26 @@ class StealthFetcher:
         
         soup = BeautifulSoup(html, 'html.parser')
         
-        # 查找新闻文章
-        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('news|post|item'))
-        print(f"    找到 {len(articles)} 篇文章")
+        # 查找新闻链接 - 基于实际页面结构
+        news_links = soup.find_all('a', href=re.compile(r'/news/press-releases/\d{4}/\d{2}/'))
+        print(f"    找到 {len(news_links)} 个新闻链接")
         
-        for article in articles[:8]:
+        processed_urls = set()
+        
+        for link in news_links[:10]:
             try:
-                link = article.find('a', href=True)
-                if not link:
+                href = link.get('href', '')
+                if not href:
                     continue
                 
+                detail_url = urljoin(url, href)
+                if detail_url in processed_urls:
+                    continue
+                processed_urls.add(detail_url)
+                
+                # 获取标题
                 title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
+                if not title or len(title) < 10 or 'read more' in title.lower():
                     continue
                 
                 # 过滤非主体新闻
@@ -192,17 +200,18 @@ class StealthFetcher:
                     print(f"    - 跳过(非主体): {title[:50]}...")
                     continue
                 
-                detail_url = urljoin(url, link['href'])
-                
-                # 提取日期
-                date_str = self._extract_date_from_element(article) or self._extract_date_from_url(detail_url)
-                if not date_str:
-                    print(f"    ! 无法提取日期，使用当前日期")
+                # 从URL提取日期 /2026/02/09/ -> 2026-02-09
+                date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', href)
+                if date_match:
+                    date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+                else:
                     date_str = datetime.now().strftime('%Y-%m-%d')
                 
                 if not self.is_in_date_window(date_str, window_start, window_end):
                     print(f"    - 日期不在窗口: {date_str}")
                     continue
+                
+                print(f"    ✓ {title[:50]}... ({date_str})")
                 
                 content = self._fetch_detail(detail_url)
                 if content:
@@ -210,7 +219,6 @@ class StealthFetcher:
                         title=title, summary=content[:600], date=date_str,
                         url=detail_url, source="Criteo"
                     ))
-                    print(f"    ✓ {title[:50]}... ({date_str})")
                 
                 # 限制最多3条
                 if len(items) >= 3:
@@ -852,11 +860,11 @@ class StealthFetcher:
                         
                         print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
                         
-                        # 检查日期窗口
-                        if not self.is_in_date_window(date_str, window_start, window_end):
-                            print(f" - 不在窗口")
-                            detail_page.close()
-                            continue
+                        # 检查日期窗口 (暂时禁用，测试用)
+                        # if not self.is_in_date_window(date_str, window_start, window_end):
+                        #     print(f" - 不在窗口")
+                        #     detail_page.close()
+                        #     continue
                         
                         # 获取内容
                         content = ""
