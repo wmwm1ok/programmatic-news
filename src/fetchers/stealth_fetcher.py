@@ -397,6 +397,10 @@ class StealthFetcher:
                     else:
                         print(f" ✗ 无内容")
                     
+                    # 限制最多3条
+                    if len(items) >= 3:
+                        break
+                    
                 except Exception as e:
                     continue
                     
@@ -441,51 +445,186 @@ class StealthFetcher:
         return is_ad and not is_excluded
 
     def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Unity - 使用 Google News RSS，过滤 Unity Software/Ads 相关"""
+        """抓取 Unity - 使用官网 News"""
+        items = []
+        url = "https://unity.com/news"
         print("  [Stealth] 抓取 Unity...")
-        print("    使用 Google News RSS 搜索 Unity Software 相关新闻")
         
-        # 搜索 Unity Software 相关
-        items = self._fetch_google_news_rss(
-            "Unity Software OR Unity Ads OR Unity monetization",
-            window_start,
-            window_end,
-            "Unity"
-        )
+        html = self.fetch_page(url, timeout=60000)
+        if not html:
+            return items
         
-        # 过滤：只保留与 Unity Software/游戏引擎/广告相关的
-        filtered_items = []
-        for item in items:
-            title_lower = item.title.lower()
-            # 检查是否包含 Unity Software/Ads/monétisation 关键词
-            if any(kw in title_lower for kw in ['unity software', 'unity ads', 'unity (u)', 'unity nyse', 'unity monet', 'unity engine', 'unity gaming', 'unity stock', 'unity shares']):
-                filtered_items.append(item)
+        soup = BeautifulSoup(html, 'html.parser')
         
-        # 限制最多5条
-        filtered_items = filtered_items[:5]
+        # 查找新闻文章
+        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('news|card|post'))
+        print(f"    找到 {len(articles)} 篇文章")
         
-        print(f"    Unity: {len(filtered_items)} 条（过滤后）")
-        for item in filtered_items:
-            print(f"    ✓ {item.title[:60]}... ({item.date})")
+        for article in articles[:8]:
+            try:
+                link = article.find('a', href=True)
+                if not link:
+                    continue
+                
+                title = self.clean_text(link.get_text())
+                if not title or len(title) < 10:
+                    continue
+                
+                # 过滤非主体新闻
+                if self._is_not_main_subject(title, 'Unity'):
+                    print(f"    - 跳过(非主体): {title[:50]}...")
+                    continue
+                
+                # 检查是否与广告/变现相关
+                title_lower = title.lower()
+                if not any(kw in title_lower for kw in ['ad', 'ads', 'monetiz', 'advertising', 'revenue', 'grow', 'ironsource', 'levelplay']):
+                    continue
+                
+                detail_url = urljoin(url, link['href'])
+                
+                # 尝试提取日期
+                date_str = self._extract_date_from_element(article)
+                if not date_str:
+                    # 从URL尝试
+                    date_str = self._extract_date_from_url(detail_url)
+                
+                if not date_str or not self.is_in_date_window(date_str, window_start, window_end):
+                    continue
+                
+                content = self._fetch_detail(detail_url)
+                if content:
+                    items.append(ContentItem(
+                        title=title, summary=content[:600], date=date_str,
+                        url=detail_url, source="Unity"
+                    ))
+                    print(f"    ✓ {title[:50]}... ({date_str})")
+                
+                # 限制最多3条
+                if len(items) >= 3:
+                    break
+                    
+            except Exception as e:
+                continue
         
-        return filtered_items
+        print(f"    Unity: {len(items)} 条")
+        return items
     
     def fetch_zeta(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Zeta Global - 使用 Google News RSS"""
+        """抓取 Zeta Global - 使用官网 Investor News"""
+        items = []
+        url = "https://investors.zetaglobal.com/news/default.aspx"
         print("  [Stealth] 抓取 Zeta Global...")
-        print("    使用 Google News RSS")
         
-        items = self._fetch_google_news_rss(
-            "Zeta Global",
-            window_start,
-            window_end,
-            "Zeta Global"
-        )
+        if not self._init_browser():
+            return items
+        
+        page = self.context.new_page()
+        processed_urls = set()
+        
+        try:
+            print("    访问 Zeta Global 投资者页面...")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找新闻项 - 使用多种可能的选择器
+            news_items = soup.find_all('div', class_=re.compile('news|press|item|release'))
+            print(f"    找到 {len(news_items)} 个新闻项")
+            
+            for item_elem in news_items[:10]:
+                try:
+                    # 查找标题和链接
+                    link_elem = item_elem.find('a', href=True)
+                    if not link_elem:
+                        continue
+                    
+                    title = self.clean_text(link_elem.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    # 过滤非主体新闻
+                    if self._is_not_main_subject(title, 'Zeta'):
+                        print(f"    - 跳过(非主体): {title[:50]}...")
+                        continue
+                    
+                    href = link_elem.get('href', '')
+                    if not href:
+                        continue
+                    
+                    detail_url = urljoin(url, href)
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    # 尝试从元素中提取日期
+                    date_str = ""
+                    date_elem = item_elem.find(class_=re.compile('date|time'))
+                    if date_elem:
+                        date_str = self.parse_date(date_elem.get_text()) or ""
+                    
+                    # 如果在列表页没日期，进入详情页
+                    if not date_str:
+                        detail_page = self.context.new_page()
+                        try:
+                            detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                            detail_page.wait_for_timeout(2000)
+                            
+                            detail_html = detail_page.content()
+                            detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                            
+                            # 查找日期
+                            time_tag = detail_soup.find('time')
+                            if time_tag:
+                                datetime_attr = time_tag.get('datetime', '')
+                                match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                                if match:
+                                    date_str = match.group(0)
+                            
+                            if not date_str:
+                                date_div = detail_soup.find(class_=re.compile('date'))
+                                if date_div:
+                                    date_str = self.parse_date(date_div.get_text()) or ""
+                            
+                            detail_page.close()
+                        except:
+                            try:
+                                detail_page.close()
+                            except:
+                                pass
+                    
+                    if not date_str:
+                        continue
+                    
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        continue
+                    
+                    print(f"    ✓ {title[:50]}... ({date_str})")
+                    
+                    content = self._fetch_detail(detail_url)
+                    if content:
+                        items.append(ContentItem(
+                            title=title,
+                            summary=content[:600],
+                            date=date_str,
+                            url=detail_url,
+                            source="Zeta Global"
+                        ))
+                    
+                    # 限制最多3条
+                    if len(items) >= 3:
+                        break
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Zeta Global 错误: {e}")
+        finally:
+            page.close()
         
         print(f"    Zeta Global: {len(items)} 条")
-        for item in items[:3]:
-            print(f"    ✓ {item.title[:60]}... ({item.date})")
-        
         return items
     
     def fetch_bigo_ads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
@@ -963,11 +1102,12 @@ class StealthFetcher:
                     
                     print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
                     
-                    if not self.is_in_date_window(date_str, window_start, window_end):
-                        print(f" - 不在时间窗口")
-                        continue
+                    # 测试阶段：暂时不限制日期，只看能否抓到
+                    # if not self.is_in_date_window(date_str, window_start, window_end):
+                    #     print(f" - 不在时间窗口")
+                    #     continue
                     
-                    print(f" ✅ 在时间窗口内")
+                    print(f" ✅ (日期限制已禁用，测试中)")
                     
                     # 进入详情页获取内容
                     detail_page = self.context.new_page()
@@ -1010,6 +1150,10 @@ class StealthFetcher:
                         
                         detail_page.close()
                         
+                        # 限制最多3条
+                        if len(items) >= 3:
+                            break
+                        
                     except Exception as e:
                         print(f"        ✗ 详情页错误")
                         try:
@@ -1020,6 +1164,10 @@ class StealthFetcher:
                         
                 except Exception as e:
                     continue
+                
+                # 限制最多3条
+                if len(items) >= 3:
+                    break
                     
         except Exception as e:
             print(f"    ✗ Viant Technology 错误: {e}")
