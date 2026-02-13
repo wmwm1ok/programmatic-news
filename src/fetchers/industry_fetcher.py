@@ -206,78 +206,124 @@ class IndustryFetcher(BaseFetcher):
             return None
     
     def _fetch_searchengineland_latest(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Search Engine Land 最新 3 条 - 使用 RSS feed"""
-        import xml.etree.ElementTree as ET
+        """抓取 Search Engine Land - 使用 Google News RSS"""
+        print(f"    使用 Google News RSS 搜索 SEL...")
         
-        # 尝试使用 RSS feed
-        rss_url = 'https://searchengineland.com/feed/'
+        items = []
+        
+        # 使用 Google News RSS 搜索 Search Engine Land
+        query = "site:searchengineland.com"
+        rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
         
         try:
             response = self.session.get(rss_url, timeout=30)
             response.raise_for_status()
             
             # 解析 RSS
-            root = ET.fromstring(response.content)
+            import xml.etree.ElementTree as ET
+            from email.utils import parsedate_to_datetime
             
-            # 找到所有 item 元素
-            items = []
+            root = ET.fromstring(response.content)
             channel = root.find('.//channel')
             if channel is None:
                 return []
             
-            rss_items = channel.findall('.//item')[:3]  # 取前3条
-            print(f"    RSS中找到 {len(rss_items)} 篇文章")
+            rss_items = channel.findall('.//item')[:5]  # 取前5条
+            print(f"    Google News中找到 {len(rss_items)} 篇 SEL 文章")
             
             for rss_item in rss_items:
                 try:
-                    title = rss_item.find('title')
-                    title = title.text if title is not None else ""
+                    title_elem = rss_item.find('title')
+                    title = title_elem.text if title_elem is not None else ""
                     
-                    link = rss_item.find('link')
-                    detail_url = link.text if link is not None else ""
+                    link_elem = rss_item.find('link')
+                    detail_url = link_elem.text if link_elem is not None else ""
                     
                     pub_date = rss_item.find('pubDate')
                     date_str = ""
                     if pub_date is not None and pub_date.text:
-                        # 解析 RSS 日期格式: Mon, 10 Feb 2025 14:30:00 +0000
-                        from email.utils import parsedate_to_datetime
                         try:
                             dt = parsedate_to_datetime(pub_date.text)
                             date_str = dt.strftime('%Y-%m-%d')
                         except:
                             date_str = self.parse_date(pub_date.text) or ""
                     
-                    description = rss_item.find('description')
-                    content = description.text if description is not None else ""
-                    # 清理 HTML 标签
-                    content = re.sub(r'<[^>]+>', '', content)
-                    content = self.clean_text(content)
+                    if not title or not detail_url:
+                        continue
                     
-                    if title and detail_url and date_str:
-                        # 检查日期窗口
-                        if not self.is_in_date_window(date_str, window_start, window_end):
-                            print(f"    - 日期 {date_str} 不在窗口内: {title[:40]}...")
-                            continue
-                        
-                        print(f"    处理: {title[:50]}... ({date_str})")
-                        items.append(ContentItem(
-                            title=title,
-                            summary=content[:500],
-                            date=date_str,
-                            url=detail_url,
-                            source='Search Engine Land'
-                        ))
-                        print(f"      ✓ 已添加")
+                    # 检查是否真的是 SEL 的文章
+                    if 'searchengineland' not in detail_url.lower():
+                        continue
+                    
+                    # 检查日期窗口
+                    if date_str and not self.is_in_date_window(date_str, window_start, window_end):
+                        print(f"    - 日期 {date_str} 不在窗口内: {title[:40]}...")
+                        continue
+                    
+                    print(f"    处理: {title[:50]}... ({date_str})")
+                    
+                    # 使用 Playwright 获取详情页内容
+                    content = self._fetch_sel_content_with_playwright(detail_url)
+                    
+                    items.append(ContentItem(
+                        title=title,
+                        summary=content[:500] if content else title,
+                        date=date_str,
+                        url=detail_url,
+                        source='Search Engine Land'
+                    ))
+                    print(f"      ✓ 已添加")
+                    
+                    # 只取前3条
+                    if len(items) >= 3:
+                        break
                         
                 except Exception as e:
-                    print(f"    ✗ 解析RSS项失败: {e}")
                     continue
             
             return items
             
         except Exception as e:
-            print(f"    RSS获取失败: {e}")
-            return []
+            print(f"    Google News RSS获取失败: {e}")
+            return items
+    
+    def _fetch_sel_content_with_playwright(self, url: str) -> Optional[str]:
+        """使用 Playwright 获取 SEL 文章内容"""
+        try:
+            from playwright.sync_api import sync_playwright
+            
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 800}
+                )
+                page = context.new_page()
+                page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                page.wait_for_timeout(2000)
+                
+                html = page.content()
+                browser.close()
+                
+                # 提取内容
+                soup = BeautifulSoup(html, 'html.parser')
+                for script in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                    script.decompose()
+                
+                content_elem = (
+                    soup.find('article') or
+                    soup.find('div', class_=re.compile('content|entry')) or
+                    soup.find('main')
+                )
+                
+                if content_elem:
+                    text = content_elem.get_text(separator=' ', strip=True)
+                    return self.clean_text(text)[:500]
+                
+                return ""
+        except Exception as e:
+            print(f"    Playwright获取详情失败: {str(e)[:50]}")
+            return ""
         
         for article in articles:
             try:

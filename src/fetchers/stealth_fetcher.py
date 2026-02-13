@@ -322,23 +322,34 @@ class StealthFetcher:
         return is_ad and not is_excluded
 
     def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Unity - 使用 Google News RSS，扩大搜索范围"""
+        """抓取 Unity - 使用 Google News RSS，过滤 Unity Software/Ads 相关"""
         print("  [Stealth] 抓取 Unity...")
-        print("    使用 Google News RSS 搜索 Unity 相关新闻")
+        print("    使用 Google News RSS 搜索 Unity Software 相关新闻")
         
-        # 使用更广泛的搜索词
+        # 搜索 Unity Software 相关
         items = self._fetch_google_news_rss(
-            "Unity",
+            "Unity Software OR Unity Ads OR Unity monetization",
             window_start,
             window_end,
             "Unity"
         )
         
-        print(f"    Unity: {len(items)} 条")
-        for item in items[:3]:
+        # 过滤：只保留与 Unity Software/游戏引擎/广告相关的
+        filtered_items = []
+        for item in items:
+            title_lower = item.title.lower()
+            # 检查是否包含 Unity Software/Ads/monétisation 关键词
+            if any(kw in title_lower for kw in ['unity software', 'unity ads', 'unity (u)', 'unity nyse', 'unity monet', 'unity engine', 'unity gaming', 'unity stock', 'unity shares']):
+                filtered_items.append(item)
+        
+        # 限制最多5条
+        filtered_items = filtered_items[:5]
+        
+        print(f"    Unity: {len(filtered_items)} 条（过滤后）")
+        for item in filtered_items:
             print(f"    ✓ {item.title[:60]}... ({item.date})")
         
-        return items
+        return filtered_items
     
     def fetch_zeta(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 Zeta Global - 使用 Google News RSS"""
