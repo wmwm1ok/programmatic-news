@@ -502,6 +502,151 @@ class StealthFetcher:
         print(f"    Zeta Global: {len(items)} 条")
         return items
     
+    def fetch_bigo_ads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 BIGO Ads - 从 blog 列表页获取链接，进入详情页提取日期
+        日期格式: "2026-02-03" (在 span 标签中)
+        """
+        items = []
+        url = COMPETITOR_SOURCES["BIGO Ads"]["url"]
+        print("  [Stealth] 抓取 BIGO Ads...")
+        
+        if not self._init_browser():
+            return items
+        
+        page = self.context.new_page()
+        processed_urls = set()
+        
+        try:
+            # 访问列表页
+            page.goto(url, wait_until="load", timeout=120000)
+            page.wait_for_timeout(5000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找博客链接
+            blog_links = soup.find_all('a', href=re.compile('/resources/blog/\\d+'))
+            print(f"    找到 {len(blog_links)} 个博客链接")
+            
+            # 去重并只取前3个
+            seen_urls = set()
+            unique_links = []
+            for link in blog_links:
+                href = link.get('href', '')
+                if href and href not in seen_urls:
+                    seen_urls.add(href)
+                    unique_links.append(href)
+            
+            print(f"    去重后: {len(unique_links)} 个，检查前3个")
+            
+            for i, href in enumerate(unique_links[:3]):
+                try:
+                    detail_url = urljoin(url, href)
+                    
+                    # 去重检查
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    print(f"\n    [{i+1}] 访问: {href}")
+                    
+                    # 进入详情页
+                    detail_page = self.context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        detail_page.wait_for_timeout(3000)
+                        
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 获取标题
+                        title = ""
+                        h1 = detail_soup.find('h1')
+                        if h1:
+                            title = self.clean_text(h1.get_text())
+                        else:
+                            title_elem = detail_soup.find('title')
+                            if title_elem:
+                                title = title_elem.get_text(strip=True).replace(' - BIGO Ads', '')
+                        
+                        if not title:
+                            detail_page.close()
+                            continue
+                        
+                        # 获取日期 - 查找 YYYY-MM-DD 格式
+                        date_str = ""
+                        for elem in detail_soup.find_all(['span', 'time', 'div']):
+                            text = elem.get_text(strip=True)
+                            match = re.match(r'(\d{4})-(\d{2})-(\d{2})', text)
+                            if match:
+                                date_str = text
+                                break
+                        
+                        if not date_str:
+                            detail_page.close()
+                            continue
+                        
+                        print(f"        标题: {title[:50]}...")
+                        print(f"        日期: {date_str}", end="")
+                        
+                        # 检查日期窗口
+                        if not self.is_in_date_window(date_str, window_start, window_end):
+                            print(f" - 不在窗口")
+                            detail_page.close()
+                            continue
+                        
+                        print(f" ✅ 在窗口内")
+                        
+                        # 获取内容
+                        content = ""
+                        for selector in ['article', '.content', 'main', '.blog-content']:
+                            elem = detail_soup.select_one(selector)
+                            if elem:
+                                text = elem.get_text(separator=' ', strip=True)
+                                if len(text) > 200:
+                                    content = self.clean_text(text)
+                                    break
+                        
+                        if not content:
+                            for script in detail_soup(["script", "style", "nav", "header"]):
+                                script.decompose()
+                            body = detail_soup.find('body')
+                            if body:
+                                content = self.clean_text(body.get_text(separator=' ', strip=True))
+                        
+                        if content:
+                            items.append(ContentItem(
+                                title=title,
+                                summary=content[:600],
+                                date=date_str,
+                                url=detail_url,
+                                source="BIGO Ads"
+                            ))
+                            print(f"        ✓ 已添加")
+                        else:
+                            print(f"        ✗ 无法提取内容")
+                        
+                        detail_page.close()
+                        
+                    except Exception as e:
+                        print(f"        ✗ 详情页错误: {e}")
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ BIGO Ads 错误: {e}")
+        finally:
+            page.close()
+        
+        print(f"\n    BIGO Ads: {len(items)} 条")
+        return items
+    
     def fetch_moloco(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 Moloco - 从 newsroom 页面获取 press-releases 链接
         日期在详情页 time 标签中，格式 "January 21, 2026"
