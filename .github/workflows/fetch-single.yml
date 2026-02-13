@@ -39,8 +39,14 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           mkdir -p output
-          # 将公司名转换为脚本名（小写，空格变下划线）
-          COMPANY_KEY=$(echo "${{ inputs.company }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '_')
+          # 公司名到脚本名的映射
+          case "${{ inputs.company }}" in
+            "Viant Technology") COMPANY_KEY="viant" ;;
+            "Zeta Global") COMPANY_KEY="zeta" ;;
+            "BIGO Ads") COMPANY_KEY="bigo_ads" ;;
+            *) COMPANY_KEY=$(echo "${{ inputs.company }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '_') ;;
+          esac
+          echo "Running fetch_${COMPANY_KEY}_only.py"
           python fetch_${COMPANY_KEY}_only.py
       
       - name: Upload result
