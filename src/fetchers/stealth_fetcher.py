@@ -1659,13 +1659,19 @@ class StealthFetcher:
     
     def _extract_date_from_url(self, url: str) -> str:
         """从URL提取日期 - 支持多种格式"""
-        # TTD 格式: /YYYY/DD/MM/ (日在前)
-        match = re.search(r'/\d{4}/\d{2}/\d{2}/', url)
+        # 标准格式: /YYYY/MM/DD/ 或 /YYYY/DD/MM/
+        match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', url)
         if match:
-            parts = match.group(0).strip('/').split('/')
-            if len(parts) == 3:
-                year, day, month = parts[0], parts[1], parts[2]
-                return f"{year}-{month}-{day}"
+            year, part2, part3 = match.group(1), match.group(2), match.group(3)
+            # 判断是 MM/DD 还是 DD/MM
+            # 如果 part2 > 12，则 part2 是日，part3 是月
+            # 否则假设是标准的 YYYY/MM/DD
+            if int(part2) > 12:
+                # 格式是 YYYY/DD/MM
+                return f"{year}-{part3}-{part2}"
+            else:
+                # 格式是 YYYY/MM/DD（标准）
+                return f"{year}-{part2}-{part3}"
         return ""
     
     def _extract_date_from_element(self, elem) -> str:
