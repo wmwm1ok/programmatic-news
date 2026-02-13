@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-抓取 TTD - 用于 ttd-only 分支
+抓取 TTD - 使用 HTTP 直接请求（CompetitorFetcherV2）
+这是今天上午成功的方案
 """
 import json
 import sys
@@ -8,19 +9,18 @@ import os
 sys.path.insert(0, 'src')
 
 from datetime import datetime, timedelta
-from fetchers.stealth_fetcher import StealthFetcher
+from fetchers.competitor_fetcher_v2 import CompetitorFetcherV2
 
 window_end = datetime.now()
 window_start = window_end - timedelta(days=7)
 
 print("="*70)
-print("抓取 TTD")
+print("抓取 TTD (使用 HTTP 直接请求)")
 print(f"时间窗口: {window_start.date()} ~ {window_end.date()}")
 print("="*70)
 
-stealth = StealthFetcher()
-items = stealth.fetch_ttd(window_start, window_end)
-stealth.close()
+fetcher = CompetitorFetcherV2()
+items = fetcher._fetch_ttd(window_start, window_end)
 
 # 保存结果
 result = {
