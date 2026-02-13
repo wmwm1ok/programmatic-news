@@ -192,12 +192,9 @@ class StealthFetcher:
                 
                 # 获取标题
                 title = self.clean_text(link.get_text())
-                if not title or len(title) < 10 or 'read more' in title.lower():
-                    continue
-                
-                # 过滤非主体新闻
-                if self._is_not_main_subject(title, 'Criteo'):
-                    print(f"    - 跳过(非主体): {title[:50]}...")
+                # 如果标题是 "Read More" 或类似，需要从详情页获取真实标题
+                is_read_more = 'read more' in title.lower() or len(title) < 20
+                if not title:
                     continue
                 
                 # 从URL提取日期 /2026/02/09/ -> 2026-02-09
@@ -211,14 +208,30 @@ class StealthFetcher:
                     print(f"    - 日期不在窗口: {date_str}")
                     continue
                 
-                print(f"    ✓ {title[:50]}... ({date_str})")
-                
+                # 获取详情页内容
                 content = self._fetch_detail(detail_url)
+                
+                # 如果标题是 "Read More"，从详情页获取真实标题
+                if is_read_more or len(title) < 20:
+                    # 尝试从内容提取标题（第一行或前50字符）
+                    if content:
+                        first_line = content.split('\n')[0][:80]
+                        if len(first_line) > 20:
+                            title = first_line
+                
+                # 过滤非主体新闻
+                if self._is_not_main_subject(title, 'Criteo'):
+                    print(f"    - 跳过(非主体): {title[:50]}...")
+                    continue
+                
                 if content:
+                    print(f"    ✓ {title[:50]}... ({date_str})")
                     items.append(ContentItem(
                         title=title, summary=content[:600], date=date_str,
                         url=detail_url, source="Criteo"
                     ))
+                else:
+                    print(f"    - 无内容: {title[:50]}...")
                 
                 # 限制最多3条
                 if len(items) >= 3:
@@ -860,11 +873,11 @@ class StealthFetcher:
                         
                         print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
                         
-                        # 检查日期窗口 (暂时禁用，测试用)
-                        # if not self.is_in_date_window(date_str, window_start, window_end):
-                        #     print(f" - 不在窗口")
-                        #     detail_page.close()
-                        #     continue
+                        # 检查日期窗口
+                        if not self.is_in_date_window(date_str, window_start, window_end):
+                            print(f" - 不在窗口")
+                            detail_page.close()
+                            continue
                         
                         # 获取内容
                         content = ""
