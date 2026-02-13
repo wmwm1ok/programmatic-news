@@ -60,8 +60,8 @@ COMPETITOR_SOURCES = {
     },
     "mobvista": {
         "name": "mobvista",
-        "url": "https://www.mobvista.com/en/community/blog",
-        "type": "blog",
+        "url": "https://www.mobvista.com/en/investor-relations/overview",
+        "type": "investor",
     },
     "Moloco": {
         "name": "Moloco",

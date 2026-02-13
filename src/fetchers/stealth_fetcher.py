@@ -560,6 +560,99 @@ class StealthFetcher:
         print(f"    Moloco: {len(items)} 条")
         return items
     
+    def fetch_mobvista(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Mobvista - 投资者关系页面
+        日期在 announce-item-time 类中，格式 "February 6, 2026"
+        链接通常是外部 PDF (hkexnews.hk)
+        """
+        items = []
+        url = COMPETITOR_SOURCES["mobvista"]["url"]
+        print("  [Stealth] 抓取 Mobvista...")
+        
+        if not self._init_browser():
+            return items
+        
+        page = self.context.new_page()
+        
+        try:
+            page.goto(url, wait_until="load", timeout=120000)
+            self._random_delay(5000, 8000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找公告项
+            announce_items = soup.select('.announce-item')
+            print(f"    找到 {len(announce_items)} 个公告")
+            
+            for item in announce_items[:10]:
+                try:
+                    # 获取标题
+                    title_elem = item.find('h2', class_='announce-item-title')
+                    title = self.clean_text(title_elem.get_text()) if title_elem else ""
+                    if not title:
+                        continue
+                    
+                    # 获取日期
+                    time_elem = item.find('p', class_='announce-item-time')
+                    date_text = time_elem.get_text(strip=True) if time_elem else ""
+                    
+                    # 解析日期 "February 6, 2026" -> "2026-02-06"
+                    match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                    if not match:
+                        continue
+                    
+                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                    month_num = months.get(match.group(1).lower(), '01')
+                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                    
+                    # 获取链接
+                    link_elem = item.find('a', href=True)
+                    detail_url = link_elem.get('href', '') if link_elem else ""
+                    if not detail_url:
+                        continue
+                    
+                    # 如果是相对链接，补全
+                    if detail_url.startswith('/'):
+                        detail_url = urljoin(url, detail_url)
+                    
+                    print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                    
+                    # 检查日期窗口
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        print(f" - 不在窗口")
+                        continue
+                    
+                    # 对于外部 PDF 链接，使用标题作为内容摘要
+                    # 也可以尝试获取页面上的描述文本
+                    desc_elem = item.find('p', class_=re.compile('desc|summary'))
+                    if desc_elem:
+                        content = self.clean_text(desc_elem.get_text())
+                    else:
+                        # 使用标题生成摘要
+                        content = f"Mobvista announcement: {title}"
+                    
+                    items.append(ContentItem(
+                        title=title,
+                        summary=content[:600],
+                        date=date_str,
+                        url=detail_url,
+                        source="mobvista"
+                    ))
+                    print(f" ✓ 已添加")
+                    
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Mobvista 错误: {e}")
+        finally:
+            page.close()
+        
+        print(f"    Mobvista: {len(items)} 条")
+        return items
+    
     def fetch_magnite(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 Magnite"""
         items = []
