@@ -574,6 +574,200 @@ class StealthFetcher:
         print(f"    Zeta Global: {len(items)} 条")
         return items
     
+    def fetch_pubmatic(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 PubMatic
+        PubMatic 有 HTTP2 错误，需要使用 curl/subprocess 方式
+        日期格式: "February 11, 2026"
+        从列表页提取日期和链接，进入详情页获取内容
+        """
+        items = []
+        url = COMPETITOR_SOURCES["PubMatic"]["url"]
+        print("  [Stealth] 抓取 PubMatic (使用 curl 绕过 HTTP2 限制)...")
+        
+        import subprocess
+        
+        try:
+            # 使用 curl 获取列表页
+            print("    使用 curl 获取列表页...")
+            result = subprocess.run([
+                'curl', '-s', url, '--http1.1',
+                '-H', 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                '-H', 'Accept-Language: en-US,en;q=0.9',
+            ], capture_output=True, text=True, timeout=30)
+            
+            html = result.stdout
+            
+            if not html or len(html) < 1000:
+                print("    ✗ 无法获取页面内容")
+                return items
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找新闻项 - 尝试多种选择器
+            news_items = []
+            selectors = ['.news-item', '.press-item', 'article', '.item', '.views-row', '.node']
+            for selector in selectors:
+                news_items = soup.select(selector)
+                if news_items:
+                    print(f"    使用选择器: {selector}, 找到 {len(news_items)} 个")
+                    break
+            
+            if not news_items:
+                # 尝试从表格中获取
+                rows = soup.find_all('tr')
+                if rows:
+                    print(f"    从表格找到 {len(rows)} 行")
+                    news_items = rows
+            
+            processed_urls = set()
+            
+            for item in news_items[:15]:
+                try:
+                    # 查找链接
+                    link_elem = item.find('a', href=True)
+                    if not link_elem:
+                        continue
+                    
+                    href = link_elem.get('href', '')
+                    if not href:
+                        continue
+                    
+                    # 补全 URL
+                    if href.startswith('/'):
+                        detail_url = urljoin(url, href)
+                    elif href.startswith('http'):
+                        detail_url = href
+                    else:
+                        detail_url = urljoin(url, href)
+                    
+                    # 去重
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    title = self.clean_text(link_elem.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    # 获取日期 - 从列表项中查找
+                    date_str = ""
+                    date_elem = item.find('time') or item.find(class_=re.compile('date')) or item.find(string=re.compile(r'(January|February|March|April|May|June|July|August|September|October|November|December)'))
+                    
+                    if date_elem:
+                        if hasattr(date_elem, 'get_text'):
+                            date_text = date_elem.get_text(strip=True)
+                        else:
+                            date_text = str(date_elem)
+                        
+                        # 解析日期 "February 11, 2026"
+                        match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                        if match:
+                            months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                                     'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                            month_num = months.get(match.group(1).lower(), '01')
+                            date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                    
+                    # 如果列表页没有日期，进入详情页获取
+                    if not date_str:
+                        print(f"    [{len(items)+1}] {title[:50]}... | 列表页无日期，进入详情页获取...")
+                    else:
+                        print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                        
+                        if not self.is_in_date_window(date_str, window_start, window_end):
+                            print(f" - 不在时间窗口")
+                            continue
+                        
+                        print(f" ✅ 在时间窗口内")
+                    
+                    # 使用 curl 获取详情页
+                    detail_result = subprocess.run([
+                        'curl', '-s', detail_url, '--http1.1',
+                        '-H', 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                        '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    ], capture_output=True, text=True, timeout=30)
+                    
+                    detail_html = detail_result.stdout
+                    
+                    if not detail_html or 'Access Denied' in detail_html:
+                        print(f"        ✗ 无法获取详情页")
+                        continue
+                    
+                    detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                    
+                    # 如果从列表页没有获取到日期，尝试从详情页获取
+                    if not date_str:
+                        date_elem = detail_soup.find('time') or detail_soup.find(class_=re.compile('date'))
+                        if date_elem:
+                            date_text = date_elem.get_text(strip=True)
+                            match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                            if match:
+                                months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                                         'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                                month_num = months.get(match.group(1).lower(), '01')
+                                date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                        
+                        # 备选：从 body 文本查找
+                        if not date_str:
+                            body_text = detail_soup.get_text()[:3000]
+                            match = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', body_text, re.IGNORECASE)
+                            if match:
+                                months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                                         'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                                month_num = months.get(match.group(1).lower(), '01')
+                                date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                        
+                        if not date_str:
+                            print(f"        ✗ 无法获取日期")
+                            continue
+                        
+                        print(f"        详情页日期: {date_str}", end="")
+                        
+                        if not self.is_in_date_window(date_str, window_start, window_end):
+                            print(f" - 不在时间窗口")
+                            continue
+                        
+                        print(f" ✅")
+                    
+                    # 提取内容
+                    content = ""
+                    for selector in ['.content', 'article', '.main-content', '.press-release', '.news-content', 'main', '.field-body']:
+                        elem = detail_soup.select_one(selector)
+                        if elem:
+                            text = elem.get_text(separator=' ', strip=True)
+                            if len(text) > 200:
+                                content = self.clean_text(text)
+                                break
+                    
+                    if not content:
+                        # 备选
+                        for script in detail_soup(["script", "style", "nav", "header", "footer"]):
+                            script.decompose()
+                        body = detail_soup.find('body')
+                        if body:
+                            content = self.clean_text(body.get_text(separator=' ', strip=True))
+                    
+                    if content:
+                        items.append(ContentItem(
+                            title=title,
+                            summary=content[:600],
+                            date=date_str,
+                            url=detail_url,
+                            source="PubMatic"
+                        ))
+                        print(f"        ✓ 已添加")
+                    else:
+                        print(f"        ✗ 无法提取内容")
+                    
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ PubMatic 错误: {e}")
+        
+        print(f"    PubMatic: {len(items)} 条")
+        return items
+    
     def fetch_bigo_ads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 BIGO Ads - 从 blog 列表页获取链接，进入详情页提取日期
         日期格式: "2026-02-03" (在 span 标签中)
