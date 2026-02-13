@@ -194,15 +194,22 @@ class StealthFetcher:
                     continue
                 processed_urls.add(detail_url)
                 
-                # 获取标题
+                # 获取标题 - 从链接文本或URL slug
                 title = self.clean_text(link.get_text())
-                print(f"      原标题: {title[:50]}...")
+                print(f"      原标题: '{title[:50]}...'")
+                
+                # 如果标题为空或太短，从URL slug生成
+                if not title or len(title) < 10:
+                    # 从URL路径提取标题 /criteo-introduces-.../ -> Criteo Introduces ...
+                    slug_match = re.search(r'/([^/]+)/?$', href)
+                    if slug_match:
+                        slug = slug_match.group(1)
+                        # 替换连字符为空格，首字母大写
+                        title = slug.replace('-', ' ').title()
+                        print(f"      从URL生成标题: {title[:50]}...")
                 
                 # 如果标题是 "Read More" 或类似，需要从详情页获取真实标题
                 is_read_more = 'read more' in title.lower() or len(title) < 20
-                if not title:
-                    print(f"      - 空标题")
-                    continue
                 
                 # 从URL提取日期 /2026/02/09/ -> 2026-02-09
                 date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', href)
