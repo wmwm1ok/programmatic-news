@@ -1008,7 +1008,7 @@ class StealthFetcher:
                         summary=content[:600],
                         date=date_str,
                         url=detail_url,
-                        source="mobvista"
+                        source="Mobvista"
                     ))
                     print(f" ✓ 已添加")
                     
