@@ -6,7 +6,7 @@ on:
       company:
         required: true
         type: string
-        description: '公司名称 (AppLovin, BIGO Ads, Magnite, mobvista, Moloco, PubMatic, Unity, Viant Technology, Zeta Global)'
+        description: '公司名称 (AppLovin, BIGO Ads, Criteo, Magnite, mobvista, Moloco, PubMatic, Taboola, Teads, TTD, Unity, Viant Technology, Zeta Global)'
 
 jobs:
   fetch:
@@ -56,10 +56,14 @@ if not fetch_method:
     method_map = {
         'AppLovin': 'fetch_applovin',
         'BIGO Ads': 'fetch_bigo_ads',
+        'Criteo': 'fetch_criteo',
         'Magnite': 'fetch_magnite',
         'mobvista': 'fetch_mobvista',
         'Moloco': 'fetch_moloco',
         'PubMatic': 'fetch_pubmatic',
+        'Taboola': 'fetch_taboola',
+        'Teads': 'fetch_teads',
+        'TTD': 'fetch_ttd',
         'Unity': 'fetch_unity',
         'Viant Technology': 'fetch_viant',
         'Zeta Global': 'fetch_zeta',

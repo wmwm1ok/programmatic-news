@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # 阶段1：并行抓取各公司
+  # 阶段1：并行抓取所有13家公司
   fetch-applovin:
     uses: ./.github/workflows/fetch-single.yml
     with:
@@ -20,6 +20,12 @@ jobs:
     uses: ./.github/workflows/fetch-single.yml
     with:
       company: BIGO Ads
+    secrets: inherit
+  
+  fetch-criteo:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Criteo
     secrets: inherit
   
   fetch-magnite:
@@ -46,6 +52,24 @@ jobs:
       company: PubMatic
     secrets: inherit
   
+  fetch-taboola:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Taboola
+    secrets: inherit
+  
+  fetch-teads:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Teads
+    secrets: inherit
+  
+  fetch-ttd:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: TTD
+    secrets: inherit
+  
   fetch-unity:
     uses: ./.github/workflows/fetch-single.yml
     with:
@@ -64,10 +88,11 @@ jobs:
       company: Zeta Global
     secrets: inherit
   
-  # 阶段2：main 抓取剩余公司 + 整合
+  # 阶段2：main 抓取行业资讯 + 整合所有结果
   generate-report:
-    needs: [fetch-applovin, fetch-bigo, fetch-magnite, fetch-mobvista, 
-            fetch-moloco, fetch-pubmatic, fetch-unity, fetch-viant, fetch-zeta]
+    needs: [fetch-applovin, fetch-bigo, fetch-criteo, fetch-magnite, 
+            fetch-mobvista, fetch-moloco, fetch-pubmatic, fetch-taboola,
+            fetch-teads, fetch-ttd, fetch-unity, fetch-viant, fetch-zeta]
     runs-on: ubuntu-latest
     
     steps:

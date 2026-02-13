@@ -1494,6 +1494,27 @@ class StealthFetcher:
         print(f"    Taboola: {len(items)} 条")
         return items
     
+    def fetch_ttd(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 TTD (The Trade Desk) - 使用 Google News RSS
+        URL: https://www.thetradedesk.com/press-room
+        """
+        print("  [Stealth] 抓取 TTD...")
+        print("    使用 Google News RSS")
+        
+        items = self._fetch_google_news_rss(
+            "The Trade Desk TTD news",
+            window_start,
+            window_end,
+            "TTD"
+        )
+        
+        print(f"    找到 {len(items)} 条在时间窗口内")
+        for item in items[:5]:
+            print(f"    ✓ {item.title[:50]}... ({item.date})")
+        
+        print(f"    TTD: {len(items)} 条")
+        return items
+    
     def fetch_generic(self, company_key: str, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """通用抓取方法"""
         url = COMPETITOR_SOURCES[company_key]["url"]
