@@ -1602,18 +1602,39 @@ class StealthFetcher:
             
             soup = BeautifulSoup(html, 'html.parser')
             
-            # 提取日期
+            # 提取日期 - 多种方法
             date_str = ""
-            # 方法1: time标签
+            
+            # 方法1: time标签的 datetime 属性
             time_tag = soup.find('time')
             if time_tag:
                 datetime_attr = time_tag.get('datetime', '')
                 if datetime_attr:
+                    # 尝试提取 YYYY-MM-DD 格式
                     match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
                     if match:
-                        date_str = match.group(0)
+                        year, month, day = match.group(1), match.group(2), match.group(3)
+                        # 验证日期有效性
+                        if int(month) <= 12 and int(day) <= 31:
+                            date_str = f"{year}-{month}-{day}"
             
-            # 方法2: 从URL提取日期
+            # 方法2: time标签的文本内容
+            if not date_str and time_tag:
+                time_text = time_tag.get_text(strip=True)
+                parsed = self.parse_date(time_text)
+                if parsed:
+                    date_str = parsed
+            
+            # 方法3: 查找任何包含日期的元素
+            if not date_str:
+                for elem in soup.find_all(['span', 'div', 'p'], class_=re.compile('date|time|published', re.I)):
+                    text = elem.get_text(strip=True)
+                    parsed = self.parse_date(text)
+                    if parsed:
+                        date_str = parsed
+                        break
+            
+            # 方法4: 从URL提取日期
             if not date_str:
                 date_str = self._extract_date_from_url(url)
             
