@@ -973,6 +973,148 @@ class StealthFetcher:
         print(f"    Mobvista: {len(items)} 条")
         return items
     
+    def fetch_viant(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Viant Technology
+        日期在 PressRelease-post--date 类中，格式 "January 5, 2026"
+        需要进入详情页获取内容
+        """
+        items = []
+        url = COMPETITOR_SOURCES["Viant Technology"]["url"]
+        print("  [Stealth] 抓取 Viant Technology...")
+        
+        if not self._init_browser():
+            return items
+        
+        page = self.context.new_page()
+        processed_urls = set()
+        
+        try:
+            print("    访问 Viant press releases 页面...")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            print("    ✓ 页面加载完成")
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找日期元素 - PressRelease-post--date 类
+            date_divs = soup.find_all('div', class_='PressRelease-post--date')
+            print(f"    找到 {len(date_divs)} 个日期元素")
+            
+            for i, date_div in enumerate(date_divs[:15]):
+                try:
+                    date_text = date_div.get_text(strip=True)
+                    
+                    # 解析日期 "January 5, 2026" -> "2026-01-05"
+                    match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                    if not match:
+                        continue
+                    
+                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                    month_num = months.get(match.group(1).lower(), '01')
+                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                    
+                    # 查找对应的新闻标题和链接 - 从父元素中查找
+                    parent = date_div.find_parent()
+                    if not parent:
+                        continue
+                    
+                    # 向上查找包含链接的元素
+                    link_elem = None
+                    for _ in range(3):
+                        if not parent:
+                            break
+                        link_elem = parent.find('a', href=True)
+                        if link_elem:
+                            break
+                        parent = parent.parent
+                    
+                    if not link_elem:
+                        continue
+                    
+                    href = link_elem.get('href', '')
+                    if not href:
+                        continue
+                    
+                    detail_url = urljoin(url, href)
+                    
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    title = self.clean_text(link_elem.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                    
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        print(f" - 不在时间窗口")
+                        continue
+                    
+                    print(f" ✅ 在时间窗口内")
+                    
+                    # 进入详情页获取内容
+                    detail_page = self.context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        detail_page.wait_for_timeout(3000)
+                        
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 提取内容
+                        content = ""
+                        for selector in ['.PressRelease-post', '.content', 'article', '.main-content', '.press-release', 'main']:
+                            elem = detail_soup.select_one(selector)
+                            if elem:
+                                text = elem.get_text(separator=' ', strip=True)
+                                if len(text) > 200:
+                                    content = self.clean_text(text)
+                                    break
+                        
+                        if not content:
+                            # 备选：移除脚本样式后获取 body
+                            for script in detail_soup(["script", "style", "nav", "header", "footer"]):
+                                script.decompose()
+                            body = detail_soup.find('body')
+                            if body:
+                                content = self.clean_text(body.get_text(separator=' ', strip=True))
+                        
+                        if content:
+                            items.append(ContentItem(
+                                title=title,
+                                summary=content[:600],
+                                date=date_str,
+                                url=detail_url,
+                                source="Viant Technology"
+                            ))
+                            print(f"        ✓ 已添加")
+                        else:
+                            print(f"        ✗ 无内容")
+                        
+                        detail_page.close()
+                        
+                    except Exception as e:
+                        print(f"        ✗ 详情页错误")
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Viant Technology 错误: {e}")
+        finally:
+            page.close()
+        
+        print(f"    Viant Technology: {len(items)} 条")
+        return items
+    
     def fetch_magnite(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """抓取 Magnite"""
         items = []
