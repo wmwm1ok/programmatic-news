@@ -6,7 +6,12 @@ on:
       company:
         required: true
         type: string
-        description: '公司名称 (AppLovin, BIGO Ads, Criteo, Magnite, mobvista, Moloco, PubMatic, Taboola, Teads, TTD, Unity, Viant Technology, Zeta Global)'
+        description: '公司名称'
+      fetcher:
+        required: false
+        type: string
+        default: 'stealth'
+        description: '使用的抓取器 (http, playwright, stealth)'
 
 jobs:
   fetch:
@@ -29,68 +34,12 @@ jobs:
           pip install playwright
           playwright install chromium
       
-      - name: Fetch ${{ inputs.company }}
+      - name: Fetch ${{ inputs.company }} using ${{ inputs.fetcher }}
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           mkdir -p output
-          python -c "
-import sys
-sys.path.insert(0, 'src')
-
-import json
-import os
-from datetime import datetime, timedelta
-from fetchers.stealth_fetcher import StealthFetcher
-
-company = '${{ inputs.company }}'
-window_end = datetime.now()
-window_start = window_end - timedelta(days=7)
-
-stealth = StealthFetcher()
-
-# 调用对应的 fetch 方法
-fetch_method = getattr(stealth, f'fetch_{company.lower().replace(\" \", \"_\").replace(\"-\", \"_\")}', None)
-if not fetch_method:
-    # 尝试其他命名
-    method_map = {
-        'AppLovin': 'fetch_applovin',
-        'BIGO Ads': 'fetch_bigo_ads',
-        'Criteo': 'fetch_criteo',
-        'Magnite': 'fetch_magnite',
-        'mobvista': 'fetch_mobvista',
-        'Moloco': 'fetch_moloco',
-        'PubMatic': 'fetch_pubmatic',
-        'Taboola': 'fetch_taboola',
-        'Teads': 'fetch_teads',
-        'TTD': 'fetch_ttd',
-        'Unity': 'fetch_unity',
-        'Viant Technology': 'fetch_viant',
-        'Zeta Global': 'fetch_zeta',
-    }
-    fetch_method = getattr(stealth, method_map.get(company, ''), None)
-
-if fetch_method:
-    items = fetch_method(window_start, window_end)
-    result = {
-        'company': company,
-        'items': [{'title': i.title, 'summary': i.summary, 'date': i.date, 'url': i.url, 'source': i.source} for i in items],
-        'count': len(items)
-    }
-    print(f'✓ {company}: {len(items)} 条')
-else:
-    print(f'✗ No fetch method for {company}')
-    result = {'company': company, 'items': [], 'count': 0}
-
-stealth.close()
-
-# 保存结果
-output_file = f'output/{company.replace(\" \", \"_\").lower()}_result.json'
-with open(output_file, 'w') as f:
-    json.dump(result, f, ensure_ascii=False, indent=2)
-
-print(f'Saved to {output_file}')
-"
+          python fetch_${{ inputs.company }}_only.py
       
       - name: Upload result
         uses: actions/upload-artifact@v4
