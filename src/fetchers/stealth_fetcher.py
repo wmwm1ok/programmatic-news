@@ -395,130 +395,61 @@ class StealthFetcher:
         print(f"    AppLovin: {len(items)} 条")
         return items
     
-    def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Unity
+    def _is_unity_ad_related(self, title: str) -> bool:
+        """检查 Unity 新闻是否与广告相关"""
+        title_lower = title.lower()
         
-        策略:
-        1. Unity 主站 (unity.com/news) 是客户端渲染，curl 无法获取文章列表
-        2. 使用 curl 直接访问已知的文章链接
-        3. 链接列表需要定期更新（建议每周检查一次）
-        
-        TODO: 考虑使用 Puppeteer/Selenium 等更强大的浏览器自动化工具
-              或者寻找 Unity RSS/API 端点
-        """
-        items = []
-        print("  [Stealth] 抓取 Unity...")
-        print("    注意: Unity 网站需要定期更新链接列表")
-        
-        import subprocess
-        
-        # 已知的新闻链接列表 - 需要定期更新
-        # 建议每周访问 https://unity.com/news 获取最新链接
-        news_urls = [
-            "https://unity.com/news/unitys-fourth-quarter-and-fiscal-year-2025-financial-results-are-available",
-            "https://unity.com/news/unity-appoints-bernard-kim-to-its-board-of-directors-and-announces-board-transitions",
-            # 添加更多链接...
+        # 广告相关关键词
+        ad_keywords = [
+            'ad', 'ads', 'advertising', 'advertisement',
+            'monetization', 'monetize', 'monetisation', 'monetise',
+            'programmatic', 'dsp', 'ssp', 'exchange',
+            'revenue', 'campaign', 'targeting', 'attribution',
+            'banner', 'interstitial', 'rewarded',
+            'mediation', 'bidding', 'ironsource',
+            'user acquisition', 'ua', 'app store', 'aso',
+            'vector', 'grow', 'levelplay', 'supersonic',
         ]
         
-        for i, detail_url in enumerate(news_urls):
-            try:
-                print(f"    [{i+1}] 访问: {detail_url[:70]}...")
-                
-                # 使用 curl 获取页面（绕过 Playwright 限制）
-                result = subprocess.run([
-                    'curl', '-s', detail_url,
-                    '-H', 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                    '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    '-H', 'Accept-Language: en-US,en;q=0.9',
-                ], capture_output=True, text=True, timeout=30)
-                
-                html = result.stdout
-                
-                if 'Access Denied' in html:
-                    print(f"        ⚠️ Access Denied")
-                    continue
-                
-                soup = BeautifulSoup(html, 'html.parser')
-                
-                # 获取标题
-                title = ""
-                h1 = soup.find('h1')
-                if h1:
-                    title = self.clean_text(h1.get_text())
-                else:
-                    title_elem = soup.find('title')
-                    if title_elem:
-                        title = title_elem.get_text(strip=True)
-                
-                if not title:
-                    print(f"        ✗ 无法获取标题")
-                    continue
-                
-                # 获取日期 - 从文本查找
-                date_str = ""
-                body_text = soup.get_text()[:5000]
-                date_match = re.search(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', body_text, re.IGNORECASE)
-                if date_match:
-                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
-                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
-                    month_num = months.get(date_match.group(1).lower(), '01')
-                    day = date_match.group(2).zfill(2)
-                    year = date_match.group(3)
-                    date_str = f"{year}-{month_num}-{day}"
-                
-                if not date_str:
-                    print(f"        ✗ 无法获取日期")
-                    continue
-                
-                print(f"        标题: {title[:50]}...")
-                print(f"        日期: {date_str}", end="")
-                
-                # 检查日期窗口
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    print(f" - 不在窗口")
-                    continue
-                
-                print(f" ✅ 在窗口内")
-                
-                # 获取内容
-                content = ""
-                for selector in ['article', '.content', 'main', '[role="main"]']:
-                    elem = soup.select_one(selector)
-                    if elem:
-                        text = elem.get_text(separator=' ', strip=True)
-                        if len(text) > 200:
-                            content = self.clean_text(text)
-                            break
-                
-                if not content:
-                    for script in soup(["script", "style", "nav", "header"]):
-                        script.decompose()
-                    body = soup.find('body')
-                    if body:
-                        content = self.clean_text(body.get_text(separator=' ', strip=True))
-                
-                if content:
-                    items.append(ContentItem(
-                        title=title,
-                        summary=content[:600],
-                        date=date_str,
-                        url=detail_url,
-                        source="Unity"
-                    ))
-                    print(f"        ✓ 已添加 ({len(content)} 字符)")
-                else:
-                    print(f"        ✗ 无法提取内容")
-                
-            except Exception as e:
-                print(f"        ✗ 错误: {e}")
-                continue
+        # 排除游戏引擎/开发相关的新闻
+        exclude_keywords = [
+            'game engine', 'render', 'graphics', 'shader',
+            'unity 6', 'unity 5', 'unity 3d', 'unity learn',
+            'tutorial', 'asset store', 'indie game',
+            'game development', 'unity forum', 'megacity',
+        ]
+        
+        # 检查是否包含广告关键词
+        is_ad = any(kw in title_lower for kw in ad_keywords)
+        
+        # 检查是否包含排除关键词
+        is_excluded = any(kw in title_lower for kw in exclude_keywords)
+        
+        return is_ad and not is_excluded
+
+    def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Unity - 使用 Google News RSS
+        
+        策略:
+        1. 使用 Google News RSS 搜索 "Unity Ads" 相关新闻
+        2. 过滤只保留与广告/变现相关的新闻
+        3. 避免游戏引擎相关的新闻
+        4. 自动去重（相同事件只保留一条）
+        """
+        print("  [Stealth] 抓取 Unity...")
+        print("    使用 Google News RSS 搜索广告相关新闻")
+        
+        items = self._fetch_google_news_rss(
+            "Unity Ads",
+            window_start,
+            window_end,
+            "Unity",
+            filter_fn=self._is_unity_ad_related  # 传入广告相关过滤函数
+        )
         
         print(f"    Unity: {len(items)} 条")
-        
-        # 提示更新链接
-        if len(items) == 0:
-            print("    ⚠️ 未抓取到任何新闻，可能需要更新链接列表")
-            print("       请访问 https://unity.com/news 获取最新链接")
+        for item in items[:5]:
+            print(f"    ✓ {item.title[:60]}... ({item.date})")
         
         return items
     
@@ -1197,54 +1128,237 @@ class StealthFetcher:
         print(f"    Viant Technology: {len(items)} 条")
         return items
     
-    def fetch_magnite(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Magnite"""
-        items = []
-        url = COMPETITOR_SOURCES["Magnite"]["url"]
-        print("  [Stealth] 抓取 Magnite...")
+    def _normalize_title_for_similarity(self, text: str) -> str:
+        """标准化标题用于相似度比较"""
+        text = text.lower()
         
-        html = self.fetch_page(url, wait_for="article", timeout=60000)
-        if not html:
+        # 扩展同义词替换
+        synonyms = {
+            # 公司/品牌缩写
+            'nyt': 'new york times',
+            'goog': 'google',
+            'fb': 'facebook',
+            'meta': 'facebook',
+            # 常见缩写
+            'q1': 'quarter 1',
+            'q2': 'quarter 2', 
+            'q3': 'quarter 3',
+            'q4': 'quarter 4',
+            'fy': 'fiscal year',
+            'yoy': 'year over year',
+            'y/y': 'year over year',
+            'mom': 'month over month',
+            'm/m': 'month over month',
+            # 货币/数字
+            '1b': '1 billion',
+            '1m': '1 million',
+            '1k': '1000',
+            '$1b': '1 billion dollars',
+            '$1m': '1 million dollars',
+            # Unity 相关
+            'u': 'unity',
+            'mgNI': 'magnite',
+        }
+        
+        for abbr, full in synonyms.items():
+            text = re.sub(r'\b' + re.escape(abbr) + r'\b', full, text)
+        
+        # 去除标点
+        text = re.sub(r'[^\w\s]', ' ', text)
+        # 去除停用词
+        stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should'}
+        words = [w for w in text.split() if w not in stopwords and len(w) > 2]
+        
+        return ' '.join(words)
+    
+    def _title_similarity(self, title1: str, title2: str) -> float:
+        """计算两个标题的相似度 (0-1)"""
+        if not title1 or not title2:
+            return 0.0
+        
+        t1 = self._normalize_title_for_similarity(title1)
+        t2 = self._normalize_title_for_similarity(title2)
+        
+        if not t1 or not t2:
+            return 0.0
+        
+        # 如果标准化后包含关系，认为是相似的
+        if t1 in t2 or t2 in t1:
+            return 0.85
+        
+        # 计算词集相似度 (Jaccard)
+        words1 = set(t1.split())
+        words2 = set(t2.split())
+        
+        if not words1 or not words2:
+            return 0.0
+        
+        # 如果核心词（前3个关键词）相同，认为是相似的
+        core1 = set(list(words1)[:3])
+        core2 = set(list(words2)[:3])
+        if len(core1 & core2) >= 2:
+            return 0.75
+        
+        intersection = len(words1 & words2)
+        union = len(words1 | words2)
+        
+        similarity = intersection / union if union > 0 else 0.0
+        
+        # 如果有很多共同关键词，提高相似度
+        if intersection >= 4:
+            similarity = max(similarity, 0.7)
+        
+        return similarity
+    
+    def _dedupe_items(self, items: List[ContentItem], similarity_threshold: float = 0.6) -> List[ContentItem]:
+        """根据标题相似度去重"""
+        if not items:
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.find_all('div', class_=re.compile('press|news'))
-        print(f"    找到 {len(articles)} 篇文章")
+        # 按日期排序（新的优先）
+        sorted_items = sorted(items, key=lambda x: x.date, reverse=True)
         
-        for article in articles[:10]:
-            try:
-                link = article.find('a', href=True)
-                if not link:
-                    continue
-                
-                title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                detail_url = urljoin(url, link['href'])
-                
-                # 获取日期
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text())
-                
-                if not date_str:
-                    continue
-                
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="Magnite"
-                    ))
-                    print(f"    ✓ {title[:40]}... ({date_str})")
+        unique_items = []
+        
+        for item in sorted_items:
+            is_duplicate = False
+            
+            for existing in unique_items:
+                similarity = self._title_similarity(item.title, existing.title)
+                if similarity >= similarity_threshold:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_items.append(item)
+        
+        return unique_items
+
+    def _fetch_google_news_rss(self, query: str, window_start: datetime, window_end: datetime, source_name: str, filter_fn=None) -> List[ContentItem]:
+        """使用 Google News RSS 抓取新闻
+        
+        Args:
+            query: 搜索关键词
+            window_start: 开始日期
+            window_end: 结束日期
+            source_name: 来源名称
+            filter_fn: 可选的过滤函数，接收标题返回 bool
+        """
+        items = []
+        
+        try:
+            from urllib.parse import quote_plus
+            import requests
+            
+            url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en&gl=US&ceid=US:en"
+            print(f"    使用 Google News RSS...")
+            
+            resp = requests.get(url, timeout=30, headers={
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            })
+            resp.raise_for_status()
+            
+            soup = BeautifulSoup(resp.text, 'xml')
+            
+            for item_elem in soup.find_all('item'):
+                try:
+                    title = item_elem.title.get_text() if item_elem.title else ""
+                    link = item_elem.link.get_text() if item_elem.link else ""
+                    pub_date = item_elem.pubDate.get_text() if item_elem.pubDate else ""
                     
-            except Exception as e:
-                continue
+                    if not title or not link:
+                        continue
+                    
+                    # 应用自定义过滤
+                    if filter_fn and not filter_fn(title):
+                        continue
+                    
+                    # 解析日期
+                    date_str = None
+                    if pub_date:
+                        try:
+                            dt = datetime.strptime(pub_date, '%a, %d %b %Y %H:%M:%S %Z')
+                            date_str = dt.strftime('%Y-%m-%d')
+                        except:
+                            # 尝试其他格式
+                            date_match = re.search(r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})', pub_date)
+                            if date_match:
+                                months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                                         'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
+                                date_str = f"{date_match.group(3)}-{months.get(date_match.group(2).lower(), '01')}-{date_match.group(1).zfill(2)}"
+                    
+                    if not date_str:
+                        date_str = window_end.strftime('%Y-%m-%d')
+                    
+                    # 检查日期窗口
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        continue
+                    
+                    # 尝试获取详情内容（使用 Google News 摘要作为内容）
+                    content = title  # 使用标题作为内容摘要
+                    
+                    items.append(ContentItem(
+                        title=self.clean_text(title),
+                        summary=content[:600],
+                        date=date_str,
+                        url=link,
+                        source=source_name
+                    ))
+                    
+                except Exception as e:
+                    continue
+            
+            # 去重
+            original_count = len(items)
+            items = self._dedupe_items(items, similarity_threshold=0.6)
+            removed_count = original_count - len(items)
+            
+            if removed_count > 0:
+                print(f"    去重: 移除 {removed_count} 条重复新闻")
+                    
+        except Exception as e:
+            print(f"    Google News RSS 错误: {e}")
+        
+        return items
+
+    def fetch_pubmatic(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 PubMatic - 使用 Google News RSS
+        原网站 https://investors.pubmatic.com/ 有访问限制，使用 Google News 作为备选
+        """
+        print("  [Stealth] 抓取 PubMatic...")
+        print("    注意: 原网站有访问限制，使用 Google News RSS")
+        
+        items = self._fetch_google_news_rss(
+            "PubMatic news press release", 
+            window_start, 
+            window_end, 
+            "PubMatic"
+        )
+        
+        print(f"    找到 {len(items)} 条在时间窗口内")
+        for item in items[:5]:
+            print(f"    ✓ {item.title[:50]}... ({item.date})")
+        
+        print(f"    PubMatic: {len(items)} 条")
+        return items
+    
+    def fetch_magnite(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Magnite - 使用 Google News RSS
+        原网站 https://investor.magnite.com/ 有访问限制，使用 Google News 作为备选
+        """
+        print("  [Stealth] 抓取 Magnite...")
+        print("    注意: 原网站有访问限制，使用 Google News RSS")
+        
+        items = self._fetch_google_news_rss(
+            "Magnite advertising news", 
+            window_start, 
+            window_end, 
+            "Magnite"
+        )
+        
+        print(f"    找到 {len(items)} 条在时间窗口内")
+        for item in items[:5]:
+            print(f"    ✓ {item.title[:50]}... ({item.date})")
         
         print(f"    Magnite: {len(items)} 条")
         return items

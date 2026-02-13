@@ -119,6 +119,8 @@ class HybridCompetitorFetcher:
                         items = stealth.fetch_moloco(window_start, window_end)
                     elif key == "Magnite":
                         items = stealth.fetch_magnite(window_start, window_end)
+                    elif key == "PubMatic":
+                        items = stealth.fetch_pubmatic(window_start, window_end)
                     elif key == "Taboola":
                         items = stealth.fetch_taboola(window_start, window_end)
                     elif key == "mobvista":
