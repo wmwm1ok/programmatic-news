@@ -224,31 +224,21 @@ class StealthFetcher:
                     print(f"      - 日期不在窗口")
                     continue
                 
-                # 获取详情页内容
-                print(f"      获取详情...")
-                content = self._fetch_detail(detail_url)
-                
-                # 如果标题是 "Read More"，从详情页获取真实标题
-                if is_read_more or len(title) < 20:
-                    # 尝试从内容提取标题（第一行或前50字符）
-                    if content:
-                        first_line = content.split('\n')[0][:80]
-                        if len(first_line) > 20:
-                            title = first_line
+                # 简化：不使用 _fetch_detail，直接用标题作为内容
+                # Criteo 网站有反爬，详情页获取经常失败
                 
                 # 过滤非主体新闻
                 if self._is_not_main_subject(title, 'Criteo'):
                     print(f"      - 跳过(非主体): {title[:50]}...")
                     continue
                 
-                if content:
-                    print(f"      ✓ 成功: {title[:50]}...")
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="Criteo"
-                    ))
-                else:
-                    print(f"      - 无内容")
+                # 使用标题作为摘要
+                summary = f"Criteo news: {title}"
+                print(f"      ✓ 成功: {title[:50]}...")
+                items.append(ContentItem(
+                    title=title, summary=summary[:600], date=date_str,
+                    url=detail_url, source="Criteo"
+                ))
                     print(f"    - 无内容: {title[:50]}...")
                 
                 # 限制最多3条
