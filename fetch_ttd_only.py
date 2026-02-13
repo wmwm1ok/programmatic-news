@@ -22,6 +22,11 @@ stealth = StealthFetcher()
 items = stealth.fetch_ttd(window_start, window_end)
 stealth.close()
 
+# 限制最多3条
+if len(items) > 3:
+    print(f"    限制为前3条（共{len(items)}条）")
+    items = items[:3]
+
 # 保存结果
 result = {
     'company': 'TTD',

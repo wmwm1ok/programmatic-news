@@ -162,145 +162,39 @@ class StealthFetcher:
         return ""
     
     def fetch_criteo(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Criteo - 增强版，处理 Cloudflare"""
-        items = []
-        url = COMPETITOR_SOURCES["Criteo"]["url"]
+        """抓取 Criteo - 使用 Google News RSS"""
         print("  [Stealth] 抓取 Criteo...")
+        print("    使用 Google News RSS")
         
-        if not self._init_browser():
-            return items
-        
-        page = self.context.new_page()
-        try:
-            # 增加超时到 120 秒
-            print("    访问主页建立会话...")
-            page.goto("https://www.criteo.com", wait_until="domcontentloaded", timeout=120000)
-            self._random_delay(3000, 5000)
-            
-            print("    访问投资者页面...")
-            page.goto(url, wait_until="domcontentloaded", timeout=120000)
-            self._random_delay(8000, 10000)  # 等待日历加载
-            
-            # 检查是否有 Cloudflare 挑战
-            content = page.content()
-            if 'cloudflare' in content.lower() or 'checking your browser' in content.lower():
-                print("    ⚠️ 检测到 Cloudflare，等待挑战完成...")
-                page.wait_for_timeout(15000)  # 额外等待
-            
-            date_buttons = page.query_selector_all('button.wd_wai_dateButton:not([disabled])')
-            print(f"    找到 {len(date_buttons)} 个日期")
-            
-            if len(date_buttons) == 0:
-                print("    ⚠️ 未找到日期按钮，可能页面结构已改变")
-                # 截图调试
-                try:
-                    page.screenshot(path='/tmp/criteo_screenshot.png')
-                    print("    已截图保存到 /tmp/criteo_screenshot.png")
-                except:
-                    pass
-                return items
-            
-            for i, button in enumerate(date_buttons[:20]):  # 增加到20个日期
-                try:
-                    date_text = button.inner_text().strip()
-                    if not date_text.isdigit():
-                        continue
-                    
-                    day = int(date_text)
-                    now = datetime.now()
-                    date_str = f"{now.year}-{now.month:02d}-{day:02d}"
-                    
-                    if not self.is_in_date_window(date_str, window_start, window_end):
-                        continue
-                    
-                    print(f"    [{i+1}] 处理日期: {date_str}")
-                    
-                    # 使用 JavaScript 点击
-                    button.evaluate('el => { el.scrollIntoView({block: "center"}); el.click(); }')
-                    self._random_delay(4000, 6000)
-                    
-                    html = page.content()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # 更宽松的新闻链接查找
-                    news_links = soup.find_all('a', href=re.compile(r'/news/|/press/|/release/'))
-                    print(f"      找到 {len(news_links)} 个新闻链接")
-                    
-                    for link in news_links[:3]:
-                        title = self.clean_text(link.get_text())
-                        if not title or len(title) < 10 or 'photo' in title.lower():
-                            continue
-                        
-                        href = link.get('href', '')
-                        detail_url = urljoin(url, href)
-                        
-                        content = self._fetch_detail(detail_url)
-                        if content:
-                            items.append(ContentItem(
-                                title=title, summary=content[:600], date=date_str,
-                                url=detail_url, source="Criteo"
-                            ))
-                            print(f"        ✓ {title[:40]}...")
-                            
-                except Exception as e:
-                    continue
-                    
-        except Exception as e:
-            print(f"    ✗ Criteo 错误: {e}")
-        finally:
-            page.close()
+        items = self._fetch_google_news_rss(
+            "Criteo",
+            window_start,
+            window_end,
+            "Criteo"
+        )
         
         print(f"    Criteo: {len(items)} 条")
+        for item in items[:3]:
+            print(f"    ✓ {item.title[:60]}... ({item.date})")
+        
         return items
     
     def fetch_teads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Teads"""
-        items = []
-        url = COMPETITOR_SOURCES["Teads"]["url"]
+        """抓取 Teads - 使用 Google News RSS"""
         print("  [Stealth] 抓取 Teads...")
+        print("    使用 Google News RSS")
         
-        html = self.fetch_page(url, wait_for=".card", timeout=60000)
-        if not html:
-            return items
-        
-        soup = BeautifulSoup(html, 'html.parser')
-        cards = soup.find_all('div', class_='card')
-        print(f"    找到 {len(cards)} 个卡片")
-        
-        for card in cards[:10]:
-            try:
-                link = card.find('a', href=True)
-                if not link:
-                    continue
-                
-                title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                detail_url = urljoin(url, link['href'])
-                
-                # 从URL提取日期
-                date_match = re.search(r'/(\d{4})/(\d{2})/(\d{2})/', detail_url)
-                if date_match:
-                    date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
-                else:
-                    continue
-                
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="Teads"
-                    ))
-                    print(f"    ✓ {title[:40]}... ({date_str})")
-                    
-            except Exception as e:
-                continue
+        items = self._fetch_google_news_rss(
+            "Teads",
+            window_start,
+            window_end,
+            "Teads"
+        )
         
         print(f"    Teads: {len(items)} 条")
+        for item in items[:3]:
+            print(f"    ✓ {item.title[:60]}... ({item.date})")
+        
         return items
     
     def fetch_applovin(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
@@ -428,163 +322,40 @@ class StealthFetcher:
         return is_ad and not is_excluded
 
     def fetch_unity(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Unity - 使用 Google News RSS
-        
-        策略:
-        1. 使用 Google News RSS 搜索 "Unity Ads" 相关新闻
-        2. 过滤只保留与广告/变现相关的新闻
-        3. 避免游戏引擎相关的新闻
-        4. 自动去重（相同事件只保留一条）
-        """
+        """抓取 Unity - 使用 Google News RSS，扩大搜索范围"""
         print("  [Stealth] 抓取 Unity...")
-        print("    使用 Google News RSS 搜索广告相关新闻")
+        print("    使用 Google News RSS 搜索 Unity 相关新闻")
         
+        # 使用更广泛的搜索词
         items = self._fetch_google_news_rss(
-            "Unity Ads",
+            "Unity",
             window_start,
             window_end,
-            "Unity",
-            filter_fn=self._is_unity_ad_related  # 传入广告相关过滤函数
+            "Unity"
         )
         
         print(f"    Unity: {len(items)} 条")
-        for item in items[:5]:
+        for item in items[:3]:
             print(f"    ✓ {item.title[:60]}... ({item.date})")
         
         return items
     
     def fetch_zeta(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Zeta Global
-        日期在 evergreen-item-date-time / evergreen-news-date 类中
-        格式: "February 10, 2026"
-        类似于 AppLovin 的结构
-        """
-        items = []
-        url = COMPETITOR_SOURCES["Zeta Global"]["url"]
+        """抓取 Zeta Global - 使用 Google News RSS"""
         print("  [Stealth] 抓取 Zeta Global...")
+        print("    使用 Google News RSS")
         
-        if not self._init_browser():
-            return items
-        
-        page = self.context.new_page()
-        processed_urls = set()
-        
-        try:
-            print("    访问 Zeta Global 投资者页面...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
-            print("    ✓ 页面加载完成")
-            
-            html = page.content()
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # 查找日期元素 - evergreen-item-date-time / evergreen-news-date 类
-            date_divs = soup.find_all('div', class_=re.compile('evergreen-item-date-time|evergreen-news-date'))
-            print(f"    找到 {len(date_divs)} 个日期元素")
-            
-            for i, date_div in enumerate(date_divs[:15]):
-                try:
-                    date_text = date_div.get_text(strip=True)
-                    
-                    # 解析日期 "February 10, 2026" -> "2026-02-10"
-                    match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
-                    if not match:
-                        continue
-                    
-                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
-                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
-                    month_num = months.get(match.group(1).lower(), '01')
-                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
-                    
-                    # 查找对应的新闻标题和链接 - 从父元素中查找
-                    parent = date_div.find_parent()
-                    if not parent:
-                        continue
-                    
-                    link_elem = parent.find('a', href=True)
-                    if not link_elem:
-                        continue
-                    
-                    href = link_elem.get('href', '')
-                    if not href or '/news/' not in href:
-                        continue
-                    
-                    detail_url = urljoin(url, href)
-                    
-                    if detail_url in processed_urls:
-                        continue
-                    processed_urls.add(detail_url)
-                    
-                    title = self.clean_text(link_elem.get_text())
-                    if not title or len(title) < 10:
-                        continue
-                    
-                    print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
-                    
-                    if not self.is_in_date_window(date_str, window_start, window_end):
-                        print(f" - 不在时间窗口")
-                        continue
-                    
-                    print(f" ✅ 在时间窗口内")
-                    
-                    # 进入详情页获取内容
-                    detail_page = self.context.new_page()
-                    try:
-                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
-                        detail_page.wait_for_timeout(3000)
-                        
-                        detail_html = detail_page.content()
-                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
-                        
-                        # 提取内容
-                        content = ""
-                        for selector in ['.module_body', '.news-body', '.content', 'article', '.main-content', '.press-release', 'main']:
-                            elem = detail_soup.select_one(selector)
-                            if elem:
-                                text = elem.get_text(separator=' ', strip=True)
-                                if len(text) > 200:
-                                    content = self.clean_text(text)
-                                    break
-                        
-                        if not content:
-                            # 备选：移除脚本样式后获取 body
-                            for script in detail_soup(["script", "style", "nav", "header", "footer"]):
-                                script.decompose()
-                            body = detail_soup.find('body')
-                            if body:
-                                content = self.clean_text(body.get_text(separator=' ', strip=True))
-                        
-                        if content:
-                            items.append(ContentItem(
-                                title=title,
-                                summary=content[:600],
-                                date=date_str,
-                                url=detail_url,
-                                source="Zeta Global"
-                            ))
-                            print(f"        ✓ 已添加")
-                        else:
-                            print(f"        ✗ 无内容")
-                        
-                        detail_page.close()
-                        
-                    except Exception as e:
-                        print(f"        ✗ 详情页错误")
-                        try:
-                            detail_page.close()
-                        except:
-                            pass
-                        continue
-                        
-                except Exception as e:
-                    continue
-                    
-        except Exception as e:
-            print(f"    ✗ Zeta Global 错误: {e}")
-        finally:
-            page.close()
+        items = self._fetch_google_news_rss(
+            "Zeta Global",
+            window_start,
+            window_end,
+            "Zeta Global"
+        )
         
         print(f"    Zeta Global: {len(items)} 条")
+        for item in items[:3]:
+            print(f"    ✓ {item.title[:60]}... ({item.date})")
+        
         return items
     
     def fetch_bigo_ads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
