@@ -167,11 +167,11 @@ OUTPUT_CONFIG = {
 }
 
 
-def get_date_window(run_date: datetime = None, days: int = 14):
+def get_date_window(run_date: datetime = None, days: int = 7):
     """
     获取时间窗口
     :param run_date: 运行日期，默认为今天
-    :param days: 窗口天数（默认14天，抓取更完整）
+    :param days: 窗口天数（默认7天，抓取最近一周）
     :return: (window_start, window_end)
     """
     from datetime import timedelta

@@ -438,49 +438,120 @@ class PlaywrightFetcher:
         return items
     
     def fetch_taboola(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Taboola"""
+        """抓取 Taboola - 日期在详情页 time 标签中"""
         items = []
         url = COMPETITOR_SOURCES["Taboola"]["url"]
         
         print("  [Playwright] 抓取 Taboola...")
-        html = self.fetch_page(url, wait_for="article, .post")
-        if not html:
+        if not self._init_browser():
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.select('.post, .entry')
+        page = self.context.new_page()
+        processed_urls = set()
         
-        print(f"    找到 {len(articles)} 篇文章")
-        
-        for article in articles[:10]:
-            try:
-                link_elem = article.find('a', href=True)
-                if not link_elem:
-                    continue
-                
-                detail_url = urljoin(url, link_elem['href'])
-                title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
-                title = self.clean_text(title_elem.get_text())
-                
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
-                
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
-                    content = self._fetch_detail(detail_url)
-                    if content:
-                        items.append(ContentItem(
-                            title=title,
-                            summary=content[:600],
-                            date=date_str,
-                            url=detail_url,
-                            source="Taboola"
-                        ))
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            articles = soup.find_all('article') or soup.select('.post, .entry')
+            print(f"    找到 {len(articles)} 篇文章")
+            
+            for article in articles[:15]:
+                try:
+                    link_elem = article.find('a', href=True)
+                    if not link_elem:
+                        continue
+                    
+                    detail_url = urljoin(url, link_elem['href'])
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
+                    title = self.clean_text(title_elem.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    # 进入详情页获取日期
+                    detail_page = self.context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        detail_page.wait_for_timeout(3000)
                         
-            except Exception as e:
-                continue
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 提取日期 - Taboola 使用非标准格式 "2026-Feb-Thu"
+                        date_str = None
+                        time_elem = detail_soup.find('time')
+                        
+                        if time_elem:
+                            datetime_attr = time_elem.get('datetime', '')
+                            time_text = time_elem.get_text(strip=True)
+                            
+                            # 尝试标准格式
+                            match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                            if match:
+                                date_str = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                            # 尝试非标准格式 "2026-Feb-Thu"
+                            elif re.match(r'\d{4}-[A-Za-z]{3}-[A-Za-z]{3}', datetime_attr):
+                                match = re.match(r'(\d{4})-([A-Za-z]{3})', datetime_attr)
+                                if match:
+                                    months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                                             'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
+                                    month_num = months.get(match.group(2).lower(), '01')
+                                    day_match = re.search(r'(\d{1,2})', time_text)
+                                    if day_match:
+                                        date_str = f"{match.group(1)}-{month_num}-{day_match.group(1).zfill(2)}"
+                            # 尝试文本格式 "Feb 05 2026"
+                            elif not date_str:
+                                match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', time_text, re.IGNORECASE)
+                                if match:
+                                    months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                                             'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
+                                    date_str = f"{match.group(3)}-{months.get(match.group(1).lower(), '01')}-{match.group(2).zfill(2)}"
+                        
+                        if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                            # 直接从详情页提取内容（已经在详情页了）
+                            content = ""
+                            for selector in ['article', '.content', '.main-content', 'main', '.post-content', '.entry-content']:
+                                elem = detail_soup.select_one(selector)
+                                if elem:
+                                    text = elem.get_text(separator=' ', strip=True)
+                                    if len(text) > 200:
+                                        content = self.clean_text(text)
+                                        break
+                            
+                            if content:
+                                items.append(ContentItem(
+                                    title=title,
+                                    summary=content[:600],
+                                    date=date_str,
+                                    url=detail_url,
+                                    source="Taboola"
+                                ))
+                                print(f"    ✓ {title[:40]}... ({date_str})")
+                        
+                        detail_page.close()
+                    except Exception as e:
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Taboola 错误: {e}")
+        finally:
+            page.close()
         
+        print(f"    Taboola: {len(items)} 条")
         return items
     
     def fetch_teads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:

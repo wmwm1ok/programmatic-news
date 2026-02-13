@@ -579,6 +579,137 @@ class StealthFetcher:
         print(f"    Magnite: {len(items)} 条")
         return items
     
+    def fetch_taboola(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
+        """抓取 Taboola - 日期在详情页 time 标签中，格式非标准"""
+        items = []
+        url = COMPETITOR_SOURCES["Taboola"]["url"]
+        print("  [Stealth] 抓取 Taboola...")
+        
+        if not self._init_browser():
+            return items
+        
+        page = self.context.new_page()
+        processed_urls = set()
+        
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            self._random_delay(5000, 7000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找文章链接
+            articles = soup.find_all('article')
+            if not articles:
+                articles = soup.select('.post, .entry, .blog-post')
+            print(f"    找到 {len(articles)} 篇文章")
+            
+            for article in articles[:15]:
+                try:
+                    link = article.find('a', href=True)
+                    if not link:
+                        continue
+                    
+                    detail_url = urljoin(url, link['href'])
+                    if not '/press-releases/' in detail_url:
+                        continue
+                    
+                    # 去重
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    title = self.clean_text(link.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    # 进入详情页获取日期
+                    detail_page = self.context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        self._random_delay(2000, 4000)
+                        
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 提取日期 - Taboola 使用非标准格式
+                        date_str = None
+                        time_elem = detail_soup.find('time')
+                        
+                        if time_elem:
+                            datetime_attr = time_elem.get('datetime', '')
+                            time_text = time_elem.get_text(strip=True)
+                            
+                            # 尝试标准格式
+                            match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                            if match:
+                                date_str = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                            # 尝试非标准格式 "2026-Feb-Thu"
+                            elif re.match(r'\d{4}-[A-Za-z]{3}-[A-Za-z]{3}', datetime_attr):
+                                match = re.match(r'(\d{4})-([A-Za-z]{3})', datetime_attr)
+                                if match:
+                                    months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                                             'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
+                                    month_num = months.get(match.group(2).lower(), '01')
+                                    day_match = re.search(r'(\d{1,2})', time_text)
+                                    if day_match:
+                                        date_str = f"{match.group(1)}-{month_num}-{day_match.group(1).zfill(2)}"
+                            # 尝试文本格式 "Feb 05 2026"
+                            elif not date_str:
+                                match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', time_text, re.IGNORECASE)
+                                if match:
+                                    months = {'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+                                             'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'}
+                                    date_str = f"{match.group(3)}-{months.get(match.group(1).lower(), '01')}-{match.group(2).zfill(2)}"
+                        
+                        if not date_str:
+                            detail_page.close()
+                            continue
+                        
+                        if not self.is_in_date_window(date_str, window_start, window_end):
+                            detail_page.close()
+                            continue
+                        
+                        # 获取内容
+                        content = ""
+                        for selector in ['article', '.content', '.main-content', 'main', '.post-content', '.entry-content']:
+                            elem = detail_soup.select_one(selector)
+                            if elem:
+                                text = elem.get_text(separator=' ', strip=True)
+                                if len(text) > 200:
+                                    content = self.clean_text(text)
+                                    break
+                        
+                        if content:
+                            items.append(ContentItem(
+                                title=title,
+                                summary=content[:600],
+                                date=date_str,
+                                url=detail_url,
+                                source="Taboola"
+                            ))
+                            print(f"    ✓ {title[:40]}... ({date_str})")
+                        
+                        detail_page.close()
+                        
+                    except Exception as e:
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Taboola 错误: {e}")
+        finally:
+            page.close()
+        
+        print(f"    Taboola: {len(items)} 条")
+        return items
+    
     def fetch_generic(self, company_key: str, window_start: datetime, window_end: datetime) -> List[ContentItem]:
         """通用抓取方法"""
         url = COMPETITOR_SOURCES[company_key]["url"]
