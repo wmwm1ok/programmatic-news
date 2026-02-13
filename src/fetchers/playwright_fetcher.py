@@ -555,49 +555,152 @@ class PlaywrightFetcher:
         return items
     
     def fetch_teads(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 Teads"""
+        """抓取 Teads - 日期在详情页 time 标签文本中，如 'February 5, 2026'"""
         items = []
         url = COMPETITOR_SOURCES["Teads"]["url"]
         
         print("  [Playwright] 抓取 Teads...")
-        html = self.fetch_page(url, wait_for="article, .press-item")
-        if not html:
+        if not self._init_browser():
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.select('.press-item')
+        page = self.context.new_page()
+        processed_urls = set()
         
-        print(f"    找到 {len(articles)} 篇文章")
-        
-        for article in articles[:10]:
-            try:
-                link_elem = article.find('a', href=True)
-                if not link_elem:
-                    continue
-                
-                detail_url = urljoin(url, link_elem['href'])
-                title_elem = article.find(['h2', 'h3', 'h1']) or link_elem
-                title = self.clean_text(title_elem.get_text())
-                
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text()) or self.parse_date(date_elem.get('datetime', ''))
-                
-                if date_str and self.is_in_date_window(date_str, window_start, window_end):
-                    content = self._fetch_detail(detail_url)
-                    if content:
-                        items.append(ContentItem(
-                            title=title,
-                            summary=content[:600],
-                            date=date_str,
-                            url=detail_url,
-                            source="Teads"
-                        ))
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(5000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Teads 使用 .card 类
+            articles = soup.select('.card')
+            if not articles:
+                articles = soup.find_all('article') or soup.select('.press-item, .blog-post')
+            
+            print(f"    找到 {len(articles)} 篇文章")
+            
+            for article in articles[:5]:  # 检查前5个
+                try:
+                    link_elem = article.find('a', href=True)
+                    if not link_elem:
+                        continue
+                    
+                    detail_url = urljoin(url, link_elem['href'])
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    # Teads 的标题需要从其他元素获取，链接文本通常是 "Read more..."
+                    title_elem = article.find(['h2', 'h3', 'h1', 'h4']) or article.find(class_=re.compile('title|heading'))
+                    if not title_elem:
+                        title_elem = link_elem
+                    title = self.clean_text(title_elem.get_text())
+                    if not title or len(title) < 10 or title.lower() == 'read more':
+                        # 尝试从图片 alt 或其他属性获取标题
+                        img = article.find('img')
+                        if img and img.get('alt'):
+                            title = self.clean_text(img.get('alt'))
+                        else:
+                            continue
+                    
+                    # 进入详情页获取日期
+                    detail_page = self.context.new_page()
+                    try:
+                        detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+                        detail_page.wait_for_timeout(3000)
                         
-            except Exception as e:
-                continue
+                        detail_html = detail_page.content()
+                        detail_soup = BeautifulSoup(detail_html, 'html.parser')
+                        
+                        # 提取日期 - Teads 使用 "February 5, 2026" 格式
+                        date_str = None
+                        time_elem = detail_soup.find('time')
+                        
+                        if time_elem:
+                            datetime_attr = time_elem.get('datetime', '')
+                            time_text = time_elem.get_text(strip=True)
+                            
+                            # 尝试标准格式 datetime="2026-02-05"
+                            match = re.search(r'(\d{4})-(\d{2})-(\d{2})', datetime_attr)
+                            if match:
+                                date_str = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                            # 尝试文本格式 "February 5, 2026"
+                            elif not date_str and time_text:
+                                match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', time_text, re.IGNORECASE)
+                                if match:
+                                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                                    month_num = months.get(match.group(1).lower(), '01')
+                                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                        
+                        # 备选：查找日期类元素
+                        if not date_str:
+                            date_elem = detail_soup.find(class_=re.compile('date|published|time'))
+                            if date_elem:
+                                date_text = date_elem.get_text(strip=True)
+                                match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                                if match:
+                                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                                    month_num = months.get(match.group(1).lower(), '01')
+                                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                        
+                        if date_str:
+                            print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                        
+                        if date_str and self.is_in_date_window(date_str, window_start, window_end):
+                            # 从详情页提取内容
+                            content = ""
+                            for selector in ['article', '.content', '.main-content', 'main', '.post-content', '.entry-content', '.blog-content']:
+                                elem = detail_soup.select_one(selector)
+                                if elem:
+                                    text = elem.get_text(separator=' ', strip=True)
+                                    if len(text) > 200:
+                                        content = self.clean_text(text)
+                                        break
+                            
+                            if not content:
+                                # 备选：获取 body
+                                body = detail_soup.find('body')
+                                if body:
+                                    content = self.clean_text(body.get_text(separator=' ', strip=True))
+                            
+                            if content:
+                                items.append(ContentItem(
+                                    title=title,
+                                    summary=content[:600],
+                                    date=date_str,
+                                    url=detail_url,
+                                    source="Teads"
+                                ))
+                                print(f" ✓ 已添加")
+                            else:
+                                print(f" ✗ 无内容")
+                        elif date_str:
+                            print(f" - 不在时间窗口")
+                        else:
+                            print(f"    无法提取日期: {title[:40]}...")
+                        
+                        detail_page.close()
+                    except Exception as e:
+                        print(f"    详情页错误: {e}")
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        continue
+                        
+                except Exception as e:
+                    print(f"    处理错误: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ Teads 错误: {e}")
+        finally:
+            page.close()
         
+        print(f"    Teads: {len(items)} 条")
         return items
     
     def fetch_zeta(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
