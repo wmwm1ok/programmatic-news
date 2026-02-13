@@ -41,22 +41,48 @@ items = []
 processed_urls = set()
 
 with sync_playwright() as p:
-    print("[1] 启动浏览器...")
+    print("[1] 启动 Stealth 浏览器...")
     browser = p.chromium.launch(
         headless=True,
-        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        args=[
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-breakpad',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--disable-renderer-backgrounding',
+            '--enable-features=NetworkService',
+            '--force-color-profile=srgb',
+            '--metrics-recording-only',
+            '--mute-audio',
+        ]
     )
     
     context = browser.new_context(
         viewport={'width': 1920, 'height': 1080},
-        user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        locale='en-US',
+        timezone_id='America/New_York',
     )
+    
+    # 注入 stealth 脚本
+    context.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}, app: {}};
+        Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+    """)
     
     page = context.new_page()
     
     try:
         print("[2] 访问 AppLovin Investors 页面...")
-        page.goto(url, wait_until="networkidle", timeout=90000)
+        page.goto(url, wait_until="load", timeout=120000)
+        page.wait_for_timeout(5000)
         print("    ✓ 页面加载完成")
         
         print("[3] 等待内容加载 (5秒)...")

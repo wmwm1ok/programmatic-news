@@ -304,60 +304,93 @@ class StealthFetcher:
         return items
     
     def fetch_applovin(self, window_start: datetime, window_end: datetime) -> List[ContentItem]:
-        """抓取 AppLovin"""
+        """抓取 AppLovin - 投资者网站
+        日期在 evergreen-item-date-time / evergreen-news-date 类中，格式 "February 11, 2026"
+        """
         items = []
         url = COMPETITOR_SOURCES["AppLovin"]["url"]
         print("  [Stealth] 抓取 AppLovin...")
         
-        html = self.fetch_page(url, wait_for="article", timeout=60000)
-        if not html:
+        if not self._init_browser():
             return items
         
-        soup = BeautifulSoup(html, 'html.parser')
-        articles = soup.find_all('article') or soup.select('.news-item')
-        print(f"    找到 {len(articles)} 篇文章")
+        page = self.context.new_page()
+        processed_urls = set()
         
-        for article in articles[:10]:
-            try:
-                link = article.find('a', href=True)
-                if not link:
-                    continue
-                
-                title = self.clean_text(link.get_text())
-                if not title or len(title) < 10:
-                    continue
-                
-                detail_url = urljoin(url, link['href'])
-                
-                # 尝试从文章元素获取日期
-                date_elem = article.find('time') or article.find(class_=re.compile('date'))
-                date_str = ""
-                if date_elem:
-                    date_str = self.parse_date(date_elem.get_text())
-                
-                # 从URL尝试
-                if not date_str:
-                    date_match = re.search(r'/(\d{4})[-/](\d{2})[-/](\d{2})/', detail_url)
-                    if date_match:
-                        date_str = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
-                
-                if not date_str:
-                    # 使用当前日期作为备选
-                    date_str = datetime.now().strftime('%Y-%m-%d')
-                
-                if not self.is_in_date_window(date_str, window_start, window_end):
-                    continue
-                
-                content = self._fetch_detail(detail_url)
-                if content:
-                    items.append(ContentItem(
-                        title=title, summary=content[:600], date=date_str,
-                        url=detail_url, source="AppLovin"
-                    ))
-                    print(f"    ✓ {title[:40]}... ({date_str})")
+        try:
+            # 使用较长超时和 load 等待，确保 Cloudflare 验证完成
+            print("    访问投资者页面...")
+            page.goto(url, wait_until="load", timeout=120000)
+            self._random_delay(5000, 8000)
+            
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 查找日期元素
+            date_divs = soup.find_all('div', class_=re.compile('evergreen-item-date-time|evergreen-news-date'))
+            print(f"    找到 {len(date_divs)} 个日期元素")
+            
+            for date_div in date_divs[:10]:
+                try:
+                    date_text = date_div.get_text(strip=True)
                     
-            except Exception as e:
-                continue
+                    # 解析日期 "February 11, 2026" -> "2026-02-11"
+                    match = re.match(r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', date_text, re.IGNORECASE)
+                    if not match:
+                        continue
+                    
+                    months = {'january': '01', 'february': '02', 'march': '03', 'april': '04', 'may': '05', 'june': '06',
+                             'july': '07', 'august': '08', 'september': '09', 'october': '10', 'november': '11', 'december': '12'}
+                    month_num = months.get(match.group(1).lower(), '01')
+                    date_str = f"{match.group(3)}-{month_num}-{match.group(2).zfill(2)}"
+                    
+                    # 查找对应的新闻标题和链接
+                    parent = date_div.find_parent()
+                    if not parent:
+                        continue
+                    
+                    link_elem = parent.find('a', href=True)
+                    if not link_elem:
+                        continue
+                    
+                    href = link_elem.get('href', '')
+                    if not href or '/news/' not in href or '/events-and-presentations/' in href:
+                        continue
+                    
+                    detail_url = urljoin(url, href)
+                    
+                    if detail_url in processed_urls:
+                        continue
+                    processed_urls.add(detail_url)
+                    
+                    title = self.clean_text(link_elem.get_text())
+                    if not title or len(title) < 10:
+                        continue
+                    
+                    print(f"    [{len(items)+1}] {title[:50]}... | 日期: {date_str}", end="")
+                    
+                    if not self.is_in_date_window(date_str, window_start, window_end):
+                        print(f" - 不在时间窗口")
+                        continue
+                    
+                    # 获取详情
+                    content = self._fetch_detail(detail_url)
+                    if content:
+                        items.append(ContentItem(
+                            title=title, summary=content[:600], date=date_str,
+                            url=detail_url, source="AppLovin"
+                        ))
+                        print(f" ✓ 已添加")
+                    else:
+                        print(f" ✗ 无内容")
+                    
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"    ✗ AppLovin 错误: {e}")
+        finally:
+            page.close()
         
         print(f"    AppLovin: {len(items)} 条")
         return items
