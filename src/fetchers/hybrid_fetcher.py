@@ -125,6 +125,8 @@ class HybridCompetitorFetcher:
                         items = stealth.fetch_mobvista(window_start, window_end)
                     elif key == "BIGO Ads":
                         items = stealth.fetch_bigo_ads(window_start, window_end)
+                    elif key == "Unity":
+                        items = stealth.fetch_unity(window_start, window_end)
                     else:
                         items = stealth.fetch_generic(key, window_start, window_end)
                     
