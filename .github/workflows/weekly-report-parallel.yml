@@ -1,0 +1,119 @@
+name: Weekly Report - Parallel
+
+on:
+  # 定时触发：北京时间每周一早上 8:00 (UTC 周一 00:00)
+  schedule:
+    - cron: '0 0 * * 1'
+  
+  # 手动触发
+  workflow_dispatch:
+
+jobs:
+  # 阶段1：并行抓取各公司
+  fetch-applovin:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: AppLovin
+    secrets: inherit
+  
+  fetch-bigo:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: BIGO Ads
+    secrets: inherit
+  
+  fetch-magnite:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Magnite
+    secrets: inherit
+  
+  fetch-mobvista:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: mobvista
+    secrets: inherit
+  
+  fetch-moloco:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Moloco
+    secrets: inherit
+  
+  fetch-pubmatic:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: PubMatic
+    secrets: inherit
+  
+  fetch-unity:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Unity
+    secrets: inherit
+  
+  fetch-viant:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Viant Technology
+    secrets: inherit
+  
+  fetch-zeta:
+    uses: ./.github/workflows/fetch-single.yml
+    with:
+      company: Zeta Global
+    secrets: inherit
+  
+  # 阶段2：main 抓取剩余公司 + 整合
+  generate-report:
+    needs: [fetch-applovin, fetch-bigo, fetch-magnite, fetch-mobvista, 
+            fetch-moloco, fetch-pubmatic, fetch-unity, fetch-viant, fetch-zeta]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install chromium
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "*-result"
+          merge-multiple: true
+      
+      - name: List downloaded artifacts
+        run: |
+          echo "=== Downloaded artifacts ==="
+          ls -la artifacts/
+      
+      - name: Generate and send report
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM || secrets.EMAIL_USERNAME }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO || 'wangmeng42@baidu.com' }}
+        run: |
+          python run_weekly_report_parallel.py
+      
+      - name: Upload final report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-report-final
+          path: output/*.html
+          retention-days: 30

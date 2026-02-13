@@ -66,7 +66,7 @@ def main():
         print(f"⚠️ 未设置 DEEPSEEK_API_KEY，将使用原文摘要")
         use_ai_summary = False
     
-    # 1. 抓取竞品资讯
+    # 1. 抓取竞品资讯（总超时 8 分钟）
     print("\n[1/4] 抓取竞品资讯...")
     competitor_results = {}
     competitor_items = []
@@ -75,10 +75,10 @@ def main():
         import signal
         
         def timeout_handler(signum, frame):
-            raise TimeoutError("抓取超时")
+            raise TimeoutError("抓取总超时")
         
         signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(300)  # 5分钟超时
+        signal.alarm(480)  # 8分钟总超时
         
         fetcher = HybridCompetitorFetcher()
         competitor_results = fetcher.fetch_all(window_start, window_end)
