@@ -159,7 +159,7 @@ def main():
     
     # 计算日期窗口
     window_end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
-    window_start = (window_end - timedelta(days=14)).replace(hour=0, minute=0, second=0, microsecond=0)
+    window_start = (window_end - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
     start_str = str(window_start.date())
     end_str = str(window_end.date())
     
