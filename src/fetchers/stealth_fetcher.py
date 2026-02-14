@@ -537,8 +537,20 @@ class StealthFetcher:
             "Unity"
         )
         
-        # 限制最多3条
-        items = items[:3]
+        # 过滤掉非 Unity 主体的新闻（如竞争对手的新闻）
+        filtered_items = []
+        for item in items:
+            title_lower = item.title.lower()
+            # 检查标题是否包含 Unity 相关关键词
+            if 'unity' in title_lower or 'u)' in title_lower or 'nyse:u' in title_lower:
+                # 排除明显是竞争对手的新闻
+                if 'applovin' not in title_lower and 'roblox' not in title_lower:
+                    filtered_items.append(item)
+        
+        items = filtered_items
+        
+        # 限制最多2条
+        items = items[:2]
         
         print(f"    找到 {len(items)} 条在时间窗口内")
         for item in items[:5]:
